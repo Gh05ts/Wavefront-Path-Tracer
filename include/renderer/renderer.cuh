@@ -14,8 +14,11 @@ void generatePrimaryRays(
     Camera camera,
     uint32_t width,
     uint32_t height,
-    uint32_t sampleIndex
+    const uint32_t* sampleIndex
 );
+
+__global__
+void advanceSampleIndex(uint32_t* sampleIndex);
 
 __global__
 void intersectScene(

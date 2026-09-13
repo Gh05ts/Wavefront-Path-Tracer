@@ -4,7 +4,7 @@
 #include <cmath>
 
 __global__
-void generatePrimaryRays(RayQueue queue, PathState* pathStates, Camera camera, uint32_t width, uint32_t height, uint32_t sampleIndex) {
+void generatePrimaryRays(RayQueue queue, PathState* pathStates, Camera camera, uint32_t width, uint32_t height, const uint32_t* sampleIndex) {
     uint32_t pixel = blockIdx.x * blockDim.x + threadIdx.x;
     uint32_t pixelCount = width * height;
 
@@ -14,7 +14,7 @@ void generatePrimaryRays(RayQueue queue, PathState* pathStates, Camera camera, u
     uint32_t x = pixel % width;
     uint32_t y = pixel / width;
 
-    uint32_t rngState = makeRngSeed(pixel ^ (sampleIndex * 0x9e3779b9u));
+    uint32_t rngState = makeRngSeed(pixel ^ (*sampleIndex * 0x9e3779b9u));
 
     float u = (static_cast<float>(x) + randomFloat(rngState)) / static_cast<float>(width);
     float v = (static_cast<float>(y) + randomFloat(rngState)) / static_cast<float>(height);
@@ -29,6 +29,11 @@ void generatePrimaryRays(RayQueue queue, PathState* pathStates, Camera camera, u
         return;
 
     queue.items[outputIndex] = RayWorkItem{ray, pixel};
+}
+
+__global__
+void advanceSampleIndex(uint32_t* sampleIndex) {
+    ++*sampleIndex;
 }
 
 __device__

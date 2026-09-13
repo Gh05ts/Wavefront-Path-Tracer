@@ -101,6 +101,9 @@ int main() {
     IntersectionResult* deviceIntersectionResults = nullptr;
     CUDA_CHECK(cudaMalloc(&deviceIntersectionResults, sizeof(IntersectionResult) * pixelCount));
 
+    uint32_t* deviceSampleIndex = nullptr;
+    CUDA_CHECK(cudaMalloc(&deviceSampleIndex, sizeof(uint32_t)));
+
     // --------------------------------------------------------
     // Generate primary rays
     // --------------------------------------------------------
@@ -116,37 +119,50 @@ int main() {
     constexpr uint32_t russianRouletteStartDepth = 3;
     constexpr uint32_t samplesPerPixel = 64;
 
+    cudaStream_t traceStream;
+    CUDA_CHECK(cudaStreamCreateWithFlags(&traceStream, cudaStreamNonBlocking));
+
+    CUDA_CHECK(cudaMemsetAsync(deviceSampleIndex, 0, sizeof(uint32_t), traceStream));
+    CUDA_CHECK(cudaStreamSynchronize(traceStream));
+
+    cudaGraph_t traceGraph = nullptr;
+    cudaGraphExec_t traceGraphExec = nullptr;
+
+    CUDA_CHECK(cudaStreamBeginCapture(traceStream, cudaStreamCaptureModeGlobal));
+
+    CUDA_CHECK(cudaMemsetAsync(deviceRayCount, 0, sizeof(uint32_t), traceStream));
+    generatePrimaryRays<<<blockCount, blockSize, 0, traceStream>>>(rayQueue,  devicePathStates,  camera,  width,  height,  deviceSampleIndex);
+
+    RayQueue currentRayQueue = rayQueue;
+    RayQueue nextRays = nextRayQueue;
+
+    for (uint32_t bounce = 0; bounce < maxDepth; ++bounce) {
+        CUDA_CHECK(cudaMemsetAsync(nextRays.count, 0, sizeof(uint32_t), traceStream));
+
+        intersectScene<<<blockCount, blockSize, 0, traceStream>>>(currentRayQueue,  deviceIntersectionResults,  deviceScene.scene);
+        shadePaths<<<blockCount, blockSize, 0, traceStream>>>(currentRayQueue,  deviceIntersectionResults,  nextRays,  devicePathStates,  deviceScene.scene,  maxDepth,  russianRouletteStartDepth,  deviceFramebuffer);
+
+        std::swap(currentRayQueue, nextRays);
+    }
+
+    advanceSampleIndex<<<1, 1, 0, traceStream>>>(deviceSampleIndex);
+
+    CUDA_CHECK(cudaStreamEndCapture(traceStream, &traceGraph));
+    CUDA_CHECK(cudaGraphInstantiate(&traceGraphExec, traceGraph, nullptr, nullptr, 0));
+
     cudaEvent_t traceStart;
     cudaEvent_t traceEnd;
     CUDA_CHECK(cudaEventCreate(&traceStart));
     CUDA_CHECK(cudaEventCreate(&traceEnd));
-    CUDA_CHECK(cudaEventRecord(traceStart));
+    CUDA_CHECK(cudaEventRecord(traceStart, traceStream));
 
     for (uint32_t sample = 0; sample < samplesPerPixel; ++sample) {
-        CUDA_CHECK(cudaMemset(deviceRayCount, 0, sizeof(uint32_t)));
-        generatePrimaryRays<<<blockCount, blockSize>>>(rayQueue,  devicePathStates,  camera,  width,  height,  sample);
-
-        CUDA_CHECK(cudaGetLastError());
-
-        RayQueue currentRayQueue = rayQueue;
-        RayQueue nextRays = nextRayQueue;
-
-        for (uint32_t bounce = 0; bounce < maxDepth; ++bounce) {
-            CUDA_CHECK(cudaMemset(nextRays.count, 0, sizeof(uint32_t)));
-
-            intersectScene<<<blockCount, blockSize>>>(currentRayQueue,  deviceIntersectionResults,  deviceScene.scene);
-            CUDA_CHECK(cudaGetLastError());
-
-            shadePaths<<<blockCount, blockSize>>>(currentRayQueue,  deviceIntersectionResults,  nextRays,  devicePathStates,  deviceScene.scene,  maxDepth,  russianRouletteStartDepth,  deviceFramebuffer);
-            CUDA_CHECK(cudaGetLastError());
-
-            std::swap(currentRayQueue, nextRays);
-        }
+        CUDA_CHECK(cudaGraphLaunch(traceGraphExec, traceStream));
 
         std::cout << "Completed sample " << sample + 1 << " of " << samplesPerPixel << '\n';
     }
 
-    CUDA_CHECK(cudaEventRecord(traceEnd));
+    CUDA_CHECK(cudaEventRecord(traceEnd, traceStream));
     CUDA_CHECK(cudaEventSynchronize(traceEnd));
 
     float traceMilliseconds = 0.0f;
@@ -175,6 +191,10 @@ int main() {
 
     destroyDeviceScene(deviceScene);
 
+    CUDA_CHECK(cudaGraphExecDestroy(traceGraphExec));
+    CUDA_CHECK(cudaGraphDestroy(traceGraph));
+    CUDA_CHECK(cudaStreamDestroy(traceStream));
+
     CUDA_CHECK(cudaFree(devicePathStates));
     CUDA_CHECK(cudaFree(deviceFramebuffer));
 
@@ -185,6 +205,7 @@ int main() {
     CUDA_CHECK(cudaFree(deviceNextRayCount));
 
     CUDA_CHECK(cudaFree(deviceIntersectionResults));
+    CUDA_CHECK(cudaFree(deviceSampleIndex));
 
     CUDA_CHECK(cudaEventDestroy(traceStart));
     CUDA_CHECK(cudaEventDestroy(traceEnd));
