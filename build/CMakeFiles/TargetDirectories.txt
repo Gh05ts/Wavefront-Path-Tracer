@@ -1,0 +1,3 @@
+/home/myid/lv37348/pt/new/build/CMakeFiles/pathtracer.dir
+/home/myid/lv37348/pt/new/build/CMakeFiles/edit_cache.dir
+/home/myid/lv37348/pt/new/build/CMakeFiles/rebuild_cache.dir
