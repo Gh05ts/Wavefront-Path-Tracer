@@ -146,7 +146,7 @@ bool intersectTriangle(const Ray& ray, const Triangle& triangle, float& t) {
 }
 
 __global__
-void intersectScene(RayQueue rays, HitWorkItem* hitCandidates, MissWorkItem* missCandidates, uint8_t* hitFlags, uint8_t* missFlags, Scene scene) {
+void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     uint32_t rayCount = *rays.count;
 
@@ -191,10 +191,7 @@ void intersectScene(RayQueue rays, HitWorkItem* hitCandidates, MissWorkItem* mis
     }
 
     if (closestMaterial < 0) {
-        hitFlags[index] = 0;
-        missFlags[index] = 1;
-        missCandidates[index] = MissWorkItem{work.pathIndex};
-
+        results[index].didHit = false;
         return;
     }
 
@@ -207,130 +204,99 @@ void intersectScene(RayQueue rays, HitWorkItem* hitCandidates, MissWorkItem* mis
     hit.normal = closestNormal;
     hit.material = static_cast<uint32_t>(closestMaterial);
 
-    hitFlags[index] = 1;
-    missFlags[index] = 0;
-
-    hitCandidates[index] = HitWorkItem{work.pathIndex, hit};
+    results[index] = IntersectionResult{hit, true};
 }
 
 __global__
-void shadeMisses(MissQueue misses, PathState* pathStates, Vec3* framebuffer) {
+void shadePaths(RayQueue rays, const IntersectionResult* results, PathState* pathStates, RayWorkItem* continuationCandidates, uint8_t* activeFlags, Scene scene, uint32_t maxDepth, uint32_t russianRouletteStartDepth, Vec3* framebuffer) {
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
-    uint32_t missCount = *misses.count;
+    uint32_t rayCount = *rays.count;
 
-    if (index >= missCount)
+    if (index >= rayCount)
         return;
 
-    const MissWorkItem& work = misses.items[index];
+    const RayWorkItem& work = rays.items[index];
     PathState& path = pathStates[work.pathIndex];
 
-    float t = 0.5f * (path.ray.direction.y + 1.0f);
-    Vec3 sky = (1.0f - t) * Vec3(1.0f, 1.0f, 1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
-    path.radiance += hadamard(path.throughput, sky);
-    path.active = false;
-    framebuffer[path.pixelIndex] += path.radiance;
-}
-
-__global__
-void shadeHits(HitQueue hits, PathState* pathStates, Scene scene, uint32_t maxDepth, uint32_t russianRouletteStartDepth, Vec3* framebuffer) {
-    uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
-    uint32_t hitCount = *hits.count;
-
-    if (index >= hitCount)
-        return;
-
-    const HitWorkItem& work = hits.items[index];
-    PathState& path = pathStates[work.pathIndex];
-
-    const Material& material = scene.materials[work.hit.material];
-    if (material.type == MaterialType::Emissive) {
-        path.radiance += hadamard(path.throughput, material.emission);
+    if (!results[index].didHit) {
+        float t = 0.5f * (path.ray.direction.y + 1.0f);
+        Vec3 sky = (1.0f - t) * Vec3(1.0f, 1.0f, 1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
+        path.radiance += hadamard(path.throughput, sky);
         path.active = false;
         framebuffer[path.pixelIndex] += path.radiance;
+    } else {
+        const Hit& hit = results[index].hit;
 
-        return;
-    }
-
-    Vec3 direction;
-
-    switch (material.type) {
-    case MaterialType::Diffuse:
-        path.throughput = hadamard(path.throughput, material.albedo);
-        direction = sampleCosineHemisphere(work.hit.normal, path.rngState);
-        break;
-
-    case MaterialType::Metal: {
-        path.throughput = hadamard(path.throughput, material.albedo);
-        Vec3 reflected = reflect(normalize(path.ray.direction), work.hit.normal);
-
-        direction = normalize(reflected + material.roughness * randomInUnitSphere(path.rngState));
-
-        if (dot(direction, work.hit.normal) <= 0.0f) {
+        const Material& material = scene.materials[hit.material];
+        if (material.type == MaterialType::Emissive) {
+            path.radiance += hadamard(path.throughput, material.emission);
             path.active = false;
             framebuffer[path.pixelIndex] += path.radiance;
-            return;
-        }
-
-        break;
-    }
-
-    case MaterialType::Dielectric: {
-        path.throughput = hadamard(path.throughput, material.albedo);
-
-        Vec3 incident = normalize(path.ray.direction);
-        bool frontFace = dot(incident, work.hit.normal) < 0.0f;
-
-        Vec3 normal = frontFace ? work.hit.normal : -work.hit.normal;
-        float refractionRatio = frontFace ? 1.0f / material.ior : material.ior;
-        float cosTheta = fminf(dot(-incident, normal), 1.0f);
-        float sinTheta = sqrtf(fmaxf(0.0f, 1.0f - cosTheta * cosTheta));
-
-        if (refractionRatio * sinTheta > 1.0f || schlickReflectance(cosTheta, refractionRatio) > randomFloat(path.rngState)) {
-            direction = reflect(incident, normal);
         } else {
-            direction = refract(incident, normal, refractionRatio);
+            Vec3 direction;
+
+            switch (material.type) {
+            case MaterialType::Diffuse:
+                path.throughput = hadamard(path.throughput, material.albedo);
+                direction = sampleCosineHemisphere(hit.normal, path.rngState);
+                break;
+
+            case MaterialType::Metal: {
+                path.throughput = hadamard(path.throughput, material.albedo);
+                Vec3 reflected = reflect(normalize(path.ray.direction), hit.normal);
+                direction = normalize(reflected + material.roughness * randomInUnitSphere(path.rngState));
+
+                if (dot(direction, hit.normal) <= 0.0f)
+                    path.active = false;
+
+                break;
+            }
+
+            case MaterialType::Dielectric: {
+                path.throughput = hadamard(path.throughput, material.albedo);
+                Vec3 incident = normalize(path.ray.direction);
+                bool frontFace = dot(incident, hit.normal) < 0.0f;
+                Vec3 normal = frontFace ? hit.normal : -hit.normal;
+                float refractionRatio = frontFace ? 1.0f / material.ior : material.ior;
+                float cosTheta = fminf(dot(-incident, normal), 1.0f);
+                float sinTheta = sqrtf(fmaxf(0.0f, 1.0f - cosTheta * cosTheta));
+
+                if (refractionRatio * sinTheta > 1.0f || schlickReflectance(cosTheta, refractionRatio) > randomFloat(path.rngState))
+                    direction = reflect(incident, normal);
+                else
+                    direction = refract(incident, normal, refractionRatio);
+
+                break;
+            }
+
+            case MaterialType::Emissive:
+                break;
+            }
+
+            if (path.active) {
+                path.ray.origin = hit.position + direction * 0.001f;
+                path.ray.direction = direction;
+                ++path.depth;
+
+                if (path.depth >= maxDepth) {
+                    path.active = false;
+                    framebuffer[path.pixelIndex] += path.radiance;
+                } else if (path.depth >= russianRouletteStartDepth) {
+                    float survivalProbability = fminf(0.95f, fmaxf(0.05f, fmaxf(path.throughput.x, fmaxf(path.throughput.y, path.throughput.z))));
+
+                    if (randomFloat(path.rngState) > survivalProbability) {
+                        path.active = false;
+                        framebuffer[path.pixelIndex] += path.radiance;
+                    } else {
+                        path.throughput *= 1.0f / survivalProbability;
+                    }
+                }
+            } else {
+                framebuffer[path.pixelIndex] += path.radiance;
+            }
         }
-
-        break;
     }
 
-    case MaterialType::Emissive:
-        // Emissive paths returned above and never reach this branch.
-        return;
-    }
-
-    path.ray.origin = work.hit.position + direction * 0.001f;
-    path.ray.direction = direction;
-    ++path.depth;
-
-    if (path.depth >= maxDepth) {
-        path.active = false;
-        framebuffer[path.pixelIndex] += path.radiance;
-        return;
-    }
-
-    if (path.depth >= russianRouletteStartDepth) {
-        float survivalProbability = fminf(0.95f, fmaxf(0.05f, fmaxf(path.throughput.x, fmaxf(path.throughput.y, path.throughput.z))));
-
-        if (randomFloat(path.rngState) > survivalProbability) {
-            path.active = false;
-            framebuffer[path.pixelIndex] += path.radiance;
-            return;
-        }
-
-        path.throughput *= 1.0f / survivalProbability;
-    }
-
-}
-
-__global__
-void prepareNextRays(const PathState* pathStates, uint32_t pathCount, RayWorkItem* candidates, uint8_t* activeFlags) {
-    uint32_t pathIndex = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (pathIndex >= pathCount)
-        return;
-
-    const PathState& path = pathStates[pathIndex];
-    activeFlags[pathIndex] = path.active ? 1 : 0;
-    candidates[pathIndex] = RayWorkItem{path.ray, pathIndex};
+    activeFlags[index] = path.active ? 1 : 0;
+    continuationCandidates[index] = RayWorkItem{path.ray, work.pathIndex};
 }

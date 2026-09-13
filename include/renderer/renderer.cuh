@@ -20,34 +20,19 @@ void generatePrimaryRays(
 __global__
 void intersectScene(
     RayQueue rays,
-    HitWorkItem* hitCandidates,
-    MissWorkItem* missCandidates,
-    uint8_t* hitFlags,
-    uint8_t* missFlags,
+    IntersectionResult* results,
     Scene scene
 );
 
 __global__
-void shadeMisses(
-    MissQueue misses,
+void shadePaths(
+    RayQueue rays,
+    const IntersectionResult* results,
     PathState* pathStates,
-    Vec3* framebuffer
-);
-
-__global__
-void shadeHits(
-    HitQueue hits,
-    PathState* pathStates,
+    RayWorkItem* continuationCandidates,
+    uint8_t* activeFlags,
     Scene scene,
     uint32_t maxDepth,
     uint32_t russianRouletteStartDepth,
     Vec3* framebuffer
-);
-
-__global__
-void prepareNextRays(
-    const PathState* pathStates,
-    uint32_t pathCount,
-    RayWorkItem* candidates,
-    uint8_t* activeFlags
 );

@@ -109,59 +109,10 @@ int main() {
     void* deviceCompactionTempStorage = nullptr;
     size_t compactionTempStorageBytes = 0;
 
-    // --------------------------------------------------------
-    // Hit queue
-    // --------------------------------------------------------
+    IntersectionResult* deviceIntersectionResults = nullptr;
+    CUDA_CHECK(cudaMalloc(&deviceIntersectionResults, sizeof(IntersectionResult) * pixelCount));
 
-    HitWorkItem* deviceHits = nullptr;
-    CUDA_CHECK(cudaMalloc(&deviceHits, sizeof(HitWorkItem) * pixelCount));
-
-    uint32_t* deviceHitCount = nullptr;
-    CUDA_CHECK(cudaMalloc(&deviceHitCount, sizeof(uint32_t)));
-
-    HitQueue hitQueue;
-
-    hitQueue.items = deviceHits;
-    hitQueue.count = deviceHitCount;
-    hitQueue.capacity = pixelCount;
-
-    // --------------------------------------------------------
-    // Miss queue
-    // --------------------------------------------------------
-
-    MissWorkItem* deviceMisses = nullptr;
-    CUDA_CHECK(cudaMalloc(&deviceMisses, sizeof(MissWorkItem) * pixelCount));
-
-    uint32_t* deviceMissCount = nullptr;
-    CUDA_CHECK(cudaMalloc(&deviceMissCount, sizeof(uint32_t)));
-
-    MissQueue missQueue;
-
-    missQueue.items = deviceMisses;
-    missQueue.count = deviceMissCount;
-    missQueue.capacity = pixelCount;
-
-    HitWorkItem* deviceHitCandidates = nullptr;
-    CUDA_CHECK(cudaMalloc(&deviceHitCandidates, sizeof(HitWorkItem) * pixelCount));
-
-    MissWorkItem* deviceMissCandidates = nullptr;
-    CUDA_CHECK(cudaMalloc(&deviceMissCandidates, sizeof(MissWorkItem) * pixelCount));
-
-    uint8_t* deviceHitFlags = nullptr;
-    uint8_t* deviceMissFlags = nullptr;
-
-    CUDA_CHECK(cudaMalloc(&deviceHitFlags, sizeof(uint8_t) * pixelCount));
-    CUDA_CHECK(cudaMalloc(&deviceMissFlags, sizeof(uint8_t) * pixelCount));
-
-    size_t rayCompactionTempStorageBytes = 0;
-    size_t hitCompactionTempStorageBytes = 0;
-    size_t missCompactionTempStorageBytes = 0;
-
-    CUDA_CHECK(cub::DeviceSelect::Flagged(nullptr, rayCompactionTempStorageBytes, deviceRayCandidates, deviceActiveFlags, deviceNextRays, deviceNextRayCount, pixelCount));
-    CUDA_CHECK(cub::DeviceSelect::Flagged(nullptr, hitCompactionTempStorageBytes, deviceHitCandidates, deviceHitFlags, deviceHits, deviceHitCount, pixelCount));
-    CUDA_CHECK(cub::DeviceSelect::Flagged(nullptr, missCompactionTempStorageBytes, deviceMissCandidates, deviceMissFlags, deviceMisses, deviceMissCount, pixelCount));
-
-    compactionTempStorageBytes = std::max(rayCompactionTempStorageBytes, std::max(hitCompactionTempStorageBytes, missCompactionTempStorageBytes));
+    CUDA_CHECK(cub::DeviceSelect::Flagged(nullptr, compactionTempStorageBytes, deviceRayCandidates, deviceActiveFlags, deviceNextRays, deviceNextRayCount, pixelCount));
 
     CUDA_CHECK(cudaMalloc(&deviceCompactionTempStorage, compactionTempStorageBytes));
 
@@ -192,23 +143,14 @@ int main() {
 
         uint32_t currentRayCount = pixelCount;
         for (uint32_t bounce = 0; bounce < maxDepth; ++bounce) {
-            intersectScene<<<blockCount, blockSize>>>(currentRayQueue,  deviceHitCandidates,  deviceMissCandidates,  deviceHitFlags,  deviceMissFlags,  deviceScene.scene);
+            intersectScene<<<blockCount, blockSize>>>(currentRayQueue,  deviceIntersectionResults,  deviceScene.scene);
             CUDA_CHECK(cudaGetLastError());
 
-            CUDA_CHECK(cub::DeviceSelect::Flagged(deviceCompactionTempStorage, compactionTempStorageBytes, deviceHitCandidates, deviceHitFlags, hitQueue.items, hitQueue.count, currentRayCount));
-            CUDA_CHECK(cub::DeviceSelect::Flagged(deviceCompactionTempStorage, compactionTempStorageBytes, deviceMissCandidates, deviceMissFlags, missQueue.items, missQueue.count, currentRayCount));
-            CUDA_CHECK(cudaGetLastError());
-            CUDA_CHECK(cudaDeviceSynchronize());
-
-            shadeMisses<<<blockCount, blockSize>>>(missQueue, devicePathStates, deviceFramebuffer);
-            shadeHits<<<blockCount, blockSize>>>(hitQueue, devicePathStates, deviceScene.scene, maxDepth, russianRouletteStartDepth, deviceFramebuffer);
+            shadePaths<<<blockCount, blockSize>>>(currentRayQueue,  deviceIntersectionResults,  devicePathStates,  deviceRayCandidates,  deviceActiveFlags,  deviceScene.scene,  maxDepth,  russianRouletteStartDepth,  deviceFramebuffer);
             CUDA_CHECK(cudaGetLastError());
             CUDA_CHECK(cudaDeviceSynchronize());
 
-            prepareNextRays<<<blockCount, blockSize>>>(devicePathStates, pixelCount, deviceRayCandidates, deviceActiveFlags);
-            CUDA_CHECK(cudaGetLastError());
-
-            CUDA_CHECK(cub::DeviceSelect::Flagged(deviceCompactionTempStorage, compactionTempStorageBytes, deviceRayCandidates, deviceActiveFlags, nextRays.items, nextRays.count, pixelCount));
+            CUDA_CHECK(cub::DeviceSelect::Flagged(deviceCompactionTempStorage, compactionTempStorageBytes, deviceRayCandidates, deviceActiveFlags, nextRays.items, nextRays.count, currentRayCount));
             CUDA_CHECK(cudaGetLastError());
             CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -258,19 +200,8 @@ int main() {
 
     CUDA_CHECK(cudaFree(deviceRayCandidates));
     CUDA_CHECK(cudaFree(deviceActiveFlags));
+    CUDA_CHECK(cudaFree(deviceIntersectionResults));
     CUDA_CHECK(cudaFree(deviceCompactionTempStorage));
-
-    CUDA_CHECK(cudaFree(deviceHits));
-    CUDA_CHECK(cudaFree(deviceHitCount));
-
-    CUDA_CHECK(cudaFree(deviceHitCandidates));
-    CUDA_CHECK(cudaFree(deviceHitFlags));
-
-    CUDA_CHECK(cudaFree(deviceMisses));
-    CUDA_CHECK(cudaFree(deviceMissCount));
-
-    CUDA_CHECK(cudaFree(deviceMissCandidates));
-    CUDA_CHECK(cudaFree(deviceMissFlags));
 
     CUDA_CHECK(cudaDeviceReset());
 

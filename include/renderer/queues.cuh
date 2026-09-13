@@ -20,6 +20,11 @@ struct MissWorkItem {
     uint32_t pathIndex;
 };
 
+struct IntersectionResult {
+    Hit hit;
+    bool didHit;
+};
+
 struct RayQueue {
     RayWorkItem* items;
     uint32_t* count;
