@@ -28,9 +28,8 @@ __global__
 void shadePaths(
     RayQueue rays,
     const IntersectionResult* results,
+    RayQueue nextRays,
     PathState* pathStates,
-    RayWorkItem* continuationCandidates,
-    uint8_t* activeFlags,
     Scene scene,
     uint32_t maxDepth,
     uint32_t russianRouletteStartDepth,

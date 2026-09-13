@@ -1,6 +1,4 @@
 #include <cuda_runtime.h>
-#include <cub/cub.cuh>
-
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -100,21 +98,8 @@ int main() {
     nextRayQueue.count = deviceNextRayCount;
     nextRayQueue.capacity = pixelCount;
 
-    RayWorkItem* deviceRayCandidates = nullptr;
-    CUDA_CHECK(cudaMalloc(&deviceRayCandidates, sizeof(RayWorkItem) * pixelCount));
-
-    uint8_t* deviceActiveFlags = nullptr;
-    CUDA_CHECK(cudaMalloc(&deviceActiveFlags, sizeof(uint8_t) * pixelCount));
-
-    void* deviceCompactionTempStorage = nullptr;
-    size_t compactionTempStorageBytes = 0;
-
     IntersectionResult* deviceIntersectionResults = nullptr;
     CUDA_CHECK(cudaMalloc(&deviceIntersectionResults, sizeof(IntersectionResult) * pixelCount));
-
-    CUDA_CHECK(cub::DeviceSelect::Flagged(nullptr, compactionTempStorageBytes, deviceRayCandidates, deviceActiveFlags, deviceNextRays, deviceNextRayCount, pixelCount));
-
-    CUDA_CHECK(cudaMalloc(&deviceCompactionTempStorage, compactionTempStorageBytes));
 
     // --------------------------------------------------------
     // Generate primary rays
@@ -131,41 +116,42 @@ int main() {
     constexpr uint32_t russianRouletteStartDepth = 3;
     constexpr uint32_t samplesPerPixel = 64;
 
+    cudaEvent_t traceStart;
+    cudaEvent_t traceEnd;
+    CUDA_CHECK(cudaEventCreate(&traceStart));
+    CUDA_CHECK(cudaEventCreate(&traceEnd));
+    CUDA_CHECK(cudaEventRecord(traceStart));
+
     for (uint32_t sample = 0; sample < samplesPerPixel; ++sample) {
         CUDA_CHECK(cudaMemset(deviceRayCount, 0, sizeof(uint32_t)));
         generatePrimaryRays<<<blockCount, blockSize>>>(rayQueue,  devicePathStates,  camera,  width,  height,  sample);
 
         CUDA_CHECK(cudaGetLastError());
-        CUDA_CHECK(cudaDeviceSynchronize());
 
         RayQueue currentRayQueue = rayQueue;
         RayQueue nextRays = nextRayQueue;
 
-        uint32_t currentRayCount = pixelCount;
         for (uint32_t bounce = 0; bounce < maxDepth; ++bounce) {
+            CUDA_CHECK(cudaMemset(nextRays.count, 0, sizeof(uint32_t)));
+
             intersectScene<<<blockCount, blockSize>>>(currentRayQueue,  deviceIntersectionResults,  deviceScene.scene);
             CUDA_CHECK(cudaGetLastError());
 
-            shadePaths<<<blockCount, blockSize>>>(currentRayQueue,  deviceIntersectionResults,  devicePathStates,  deviceRayCandidates,  deviceActiveFlags,  deviceScene.scene,  maxDepth,  russianRouletteStartDepth,  deviceFramebuffer);
+            shadePaths<<<blockCount, blockSize>>>(currentRayQueue,  deviceIntersectionResults,  nextRays,  devicePathStates,  deviceScene.scene,  maxDepth,  russianRouletteStartDepth,  deviceFramebuffer);
             CUDA_CHECK(cudaGetLastError());
-            CUDA_CHECK(cudaDeviceSynchronize());
-
-            CUDA_CHECK(cub::DeviceSelect::Flagged(deviceCompactionTempStorage, compactionTempStorageBytes, deviceRayCandidates, deviceActiveFlags, nextRays.items, nextRays.count, currentRayCount));
-            CUDA_CHECK(cudaGetLastError());
-            CUDA_CHECK(cudaDeviceSynchronize());
-
-            uint32_t nextRayCount = 0;
-            CUDA_CHECK(cudaMemcpy(&nextRayCount, nextRays.count, sizeof(uint32_t), cudaMemcpyDeviceToHost));
-
-            if (nextRayCount == 0)
-                break;
 
             std::swap(currentRayQueue, nextRays);
-            currentRayCount = nextRayCount;
         }
 
         std::cout << "Completed sample " << sample + 1 << " of " << samplesPerPixel << '\n';
     }
+
+    CUDA_CHECK(cudaEventRecord(traceEnd));
+    CUDA_CHECK(cudaEventSynchronize(traceEnd));
+
+    float traceMilliseconds = 0.0f;
+    CUDA_CHECK(cudaEventElapsedTime(&traceMilliseconds, traceStart, traceEnd));
+    std::cout << "Trace time: " << traceMilliseconds << " ms\n";
 
     // --------------------------------------------------------
     // Resolve framebuffer and write image
@@ -198,10 +184,10 @@ int main() {
     CUDA_CHECK(cudaFree(deviceNextRays));
     CUDA_CHECK(cudaFree(deviceNextRayCount));
 
-    CUDA_CHECK(cudaFree(deviceRayCandidates));
-    CUDA_CHECK(cudaFree(deviceActiveFlags));
     CUDA_CHECK(cudaFree(deviceIntersectionResults));
-    CUDA_CHECK(cudaFree(deviceCompactionTempStorage));
+
+    CUDA_CHECK(cudaEventDestroy(traceStart));
+    CUDA_CHECK(cudaEventDestroy(traceEnd));
 
     CUDA_CHECK(cudaDeviceReset());
 

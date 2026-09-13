@@ -208,95 +208,129 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
 }
 
 __global__
-void shadePaths(RayQueue rays, const IntersectionResult* results, PathState* pathStates, RayWorkItem* continuationCandidates, uint8_t* activeFlags, Scene scene, uint32_t maxDepth, uint32_t russianRouletteStartDepth, Vec3* framebuffer) {
+void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextRays, PathState* pathStates, Scene scene, uint32_t maxDepth, uint32_t russianRouletteStartDepth, Vec3* framebuffer) {
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     uint32_t rayCount = *rays.count;
 
-    if (index >= rayCount)
-        return;
+    bool active = false;
+    RayWorkItem continuation;
 
-    const RayWorkItem& work = rays.items[index];
-    PathState& path = pathStates[work.pathIndex];
+    if (index < rayCount) {
+        const RayWorkItem& work = rays.items[index];
+        PathState& path = pathStates[work.pathIndex];
 
-    if (!results[index].didHit) {
-        float t = 0.5f * (path.ray.direction.y + 1.0f);
-        Vec3 sky = (1.0f - t) * Vec3(1.0f, 1.0f, 1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
-        path.radiance += hadamard(path.throughput, sky);
-        path.active = false;
-        framebuffer[path.pixelIndex] += path.radiance;
-    } else {
-        const Hit& hit = results[index].hit;
-
-        const Material& material = scene.materials[hit.material];
-        if (material.type == MaterialType::Emissive) {
-            path.radiance += hadamard(path.throughput, material.emission);
+        if (!results[index].didHit) {
+            float t = 0.5f * (path.ray.direction.y + 1.0f);
+            Vec3 sky = (1.0f - t) * Vec3(1.0f, 1.0f, 1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
+            path.radiance += hadamard(path.throughput, sky);
             path.active = false;
             framebuffer[path.pixelIndex] += path.radiance;
         } else {
-            Vec3 direction;
+            const Hit& hit = results[index].hit;
+            const Material& material = scene.materials[hit.material];
 
-            switch (material.type) {
-            case MaterialType::Diffuse:
-                path.throughput = hadamard(path.throughput, material.albedo);
-                direction = sampleCosineHemisphere(hit.normal, path.rngState);
-                break;
+            if (material.type == MaterialType::Emissive) {
+                path.radiance += hadamard(path.throughput, material.emission);
+                path.active = false;
+                framebuffer[path.pixelIndex] += path.radiance;
+            } else {
+                Vec3 direction;
 
-            case MaterialType::Metal: {
-                path.throughput = hadamard(path.throughput, material.albedo);
-                Vec3 reflected = reflect(normalize(path.ray.direction), hit.normal);
-                direction = normalize(reflected + material.roughness * randomInUnitSphere(path.rngState));
+                switch (material.type) {
+                case MaterialType::Diffuse:
+                    path.throughput = hadamard(path.throughput, material.albedo);
+                    direction = sampleCosineHemisphere(hit.normal, path.rngState);
+                    break;
 
-                if (dot(direction, hit.normal) <= 0.0f)
-                    path.active = false;
+                case MaterialType::Metal: {
+                    path.throughput = hadamard(path.throughput, material.albedo);
+                    Vec3 reflected = reflect(normalize(path.ray.direction), hit.normal);
+                    direction = normalize(reflected + material.roughness * randomInUnitSphere(path.rngState));
 
-                break;
-            }
+                    if (dot(direction, hit.normal) <= 0.0f)
+                        path.active = false;
 
-            case MaterialType::Dielectric: {
-                path.throughput = hadamard(path.throughput, material.albedo);
-                Vec3 incident = normalize(path.ray.direction);
-                bool frontFace = dot(incident, hit.normal) < 0.0f;
-                Vec3 normal = frontFace ? hit.normal : -hit.normal;
-                float refractionRatio = frontFace ? 1.0f / material.ior : material.ior;
-                float cosTheta = fminf(dot(-incident, normal), 1.0f);
-                float sinTheta = sqrtf(fmaxf(0.0f, 1.0f - cosTheta * cosTheta));
+                    break;
+                }
 
-                if (refractionRatio * sinTheta > 1.0f || schlickReflectance(cosTheta, refractionRatio) > randomFloat(path.rngState))
-                    direction = reflect(incident, normal);
-                else
-                    direction = refract(incident, normal, refractionRatio);
+                case MaterialType::Dielectric: {
+                    path.throughput = hadamard(path.throughput, material.albedo);
+                    Vec3 incident = normalize(path.ray.direction);
+                    bool frontFace = dot(incident, hit.normal) < 0.0f;
+                    Vec3 normal = frontFace ? hit.normal : -hit.normal;
+                    float refractionRatio = frontFace ? 1.0f / material.ior : material.ior;
+                    float cosTheta = fminf(dot(-incident, normal), 1.0f);
+                    float sinTheta = sqrtf(fmaxf(0.0f, 1.0f - cosTheta * cosTheta));
 
-                break;
-            }
+                    if (refractionRatio * sinTheta > 1.0f || schlickReflectance(cosTheta, refractionRatio) > randomFloat(path.rngState))
+                        direction = reflect(incident, normal);
+                    else
+                        direction = refract(incident, normal, refractionRatio);
 
-            case MaterialType::Emissive:
-                break;
-            }
+                    break;
+                }
 
-            if (path.active) {
-                path.ray.origin = hit.position + direction * 0.001f;
-                path.ray.direction = direction;
-                ++path.depth;
+                case MaterialType::Emissive:
+                    break;
+                }
 
-                if (path.depth >= maxDepth) {
-                    path.active = false;
-                    framebuffer[path.pixelIndex] += path.radiance;
-                } else if (path.depth >= russianRouletteStartDepth) {
-                    float survivalProbability = fminf(0.95f, fmaxf(0.05f, fmaxf(path.throughput.x, fmaxf(path.throughput.y, path.throughput.z))));
+                if (path.active) {
+                    path.ray.origin = hit.position + direction * 0.001f;
+                    path.ray.direction = direction;
+                    ++path.depth;
 
-                    if (randomFloat(path.rngState) > survivalProbability) {
+                    if (path.depth >= maxDepth) {
                         path.active = false;
                         framebuffer[path.pixelIndex] += path.radiance;
-                    } else {
-                        path.throughput *= 1.0f / survivalProbability;
+                    } else if (path.depth >= russianRouletteStartDepth) {
+                        float survivalProbability = fminf(0.95f, fmaxf(0.05f, fmaxf(path.throughput.x, fmaxf(path.throughput.y, path.throughput.z))));
+
+                        if (randomFloat(path.rngState) > survivalProbability) {
+                            path.active = false;
+                            framebuffer[path.pixelIndex] += path.radiance;
+                        } else {
+                            path.throughput *= 1.0f / survivalProbability;
+                        }
                     }
+                } else {
+                    framebuffer[path.pixelIndex] += path.radiance;
                 }
-            } else {
-                framebuffer[path.pixelIndex] += path.radiance;
             }
         }
+
+        active = path.active;
+        continuation = RayWorkItem{path.ray, work.pathIndex};
     }
 
-    activeFlags[index] = path.active ? 1 : 0;
-    continuationCandidates[index] = RayWorkItem{path.ray, work.pathIndex};
+    constexpr uint32_t warpSize = 32;
+    constexpr uint32_t warpCount = 8;
+    __shared__ uint32_t warpOffsets[warpCount];
+    __shared__ uint32_t blockBase;
+
+    uint32_t lane = threadIdx.x % warpSize;
+    uint32_t warp = threadIdx.x / warpSize;
+    unsigned int activeMask = __ballot_sync(0xffffffff, active);
+    uint32_t rank = __popc(activeMask & (lane == 0 ? 0u : ((1u << lane) - 1u)));
+
+    if (lane == 0)
+        warpOffsets[warp] = __popc(activeMask);
+
+    __syncthreads();
+
+    if (threadIdx.x == 0) {
+        uint32_t blockCount = 0;
+
+        for (uint32_t i = 0; i < warpCount; ++i) {
+            uint32_t warpCount = warpOffsets[i];
+            warpOffsets[i] = blockCount;
+            blockCount += warpCount;
+        }
+
+        blockBase = blockCount > 0 ? atomicAdd(nextRays.count, blockCount) : 0;
+    }
+
+    __syncthreads();
+
+    if (active)
+        nextRays.items[blockBase + warpOffsets[warp] + rank] = continuation;
 }
