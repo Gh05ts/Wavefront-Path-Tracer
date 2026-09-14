@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "renderer/renderer.cuh"
+#include "renderer/render_session.cuh"
 
 #define CUDA_CHECK(call)                                      \
     do                                                        \
@@ -67,9 +68,7 @@ int main() {
     PathState* devicePathStates = nullptr;
     CUDA_CHECK(cudaMalloc(&devicePathStates, sizeof(PathState) * pixelCount));
 
-    Vec3* deviceFramebuffer = nullptr;
-    CUDA_CHECK(cudaMalloc(&deviceFramebuffer, sizeof(Vec3) * pixelCount));
-    CUDA_CHECK(cudaMemset(deviceFramebuffer, 0, sizeof(Vec3) * pixelCount));
+    RenderSession renderSession = createRenderSession(width, height);
 
     // --------------------------------------------------------
     // Ray queue
@@ -102,9 +101,6 @@ int main() {
     IntersectionResult* deviceIntersectionResults = nullptr;
     CUDA_CHECK(cudaMalloc(&deviceIntersectionResults, sizeof(IntersectionResult) * pixelCount));
 
-    uint32_t* deviceSampleIndex = nullptr;
-    CUDA_CHECK(cudaMalloc(&deviceSampleIndex, sizeof(uint32_t)));
-
     // --------------------------------------------------------
     // Generate primary rays
     // --------------------------------------------------------
@@ -119,11 +115,31 @@ int main() {
     constexpr uint32_t maxDepth = 8;
     constexpr uint32_t russianRouletteStartDepth = 3;
     constexpr uint32_t samplesPerPixel = 64;
+    constexpr bool resumeFromCheckpoint = false;
+    constexpr char checkpointFilename[] = "render.checkpoint";
+    constexpr uint32_t checkpointProgressPercent = 25;
+    constexpr uint32_t checkpointBufferCount = 4;
 
     cudaStream_t traceStream;
     CUDA_CHECK(cudaStreamCreateWithFlags(&traceStream, cudaStreamNonBlocking));
 
-    CUDA_CHECK(cudaMemsetAsync(deviceSampleIndex, 0, sizeof(uint32_t), traceStream));
+    AsyncCheckpointWriter* checkpointWriter = createAsyncCheckpointWriter(width, height, checkpointFilename, checkpointBufferCount);
+
+    uint32_t completedSamples = 0;
+
+    if (resumeFromCheckpoint) {
+        completedSamples = loadRenderSessionCheckpoint(renderSession, checkpointFilename);
+
+        if (completedSamples > samplesPerPixel) {
+            std::cerr << "Checkpoint has more samples than the current render target\n";
+            return 1;
+        }
+
+        std::cout << "Resuming from " << completedSamples << " completed samples\n";
+    } else {
+        resetRenderSession(renderSession, traceStream);
+    }
+
     CUDA_CHECK(cudaStreamSynchronize(traceStream));
 
     cudaGraph_t traceGraph = nullptr;
@@ -132,7 +148,7 @@ int main() {
     CUDA_CHECK(cudaStreamBeginCapture(traceStream, cudaStreamCaptureModeGlobal));
 
     CUDA_CHECK(cudaMemsetAsync(deviceRayCount, 0, sizeof(uint32_t), traceStream));
-    generatePrimaryRays<<<blockCount, blockSize, 0, traceStream>>>(rayQueue,  devicePathStates,  camera,  width,  height,  deviceSampleIndex);
+    generatePrimaryRays<<<blockCount, blockSize, 0, traceStream>>>(rayQueue,  devicePathStates,  camera,  width,  height,  renderSession.deviceSampleIndex);
 
     RayQueue currentRayQueue = rayQueue;
     RayQueue nextRays = nextRayQueue;
@@ -141,12 +157,12 @@ int main() {
         CUDA_CHECK(cudaMemsetAsync(nextRays.count, 0, sizeof(uint32_t), traceStream));
 
         intersectScene<<<blockCount, blockSize, 0, traceStream>>>(currentRayQueue,  deviceIntersectionResults,  deviceScene.scene);
-        shadePaths<<<blockCount, blockSize, 0, traceStream>>>(currentRayQueue,  deviceIntersectionResults,  nextRays,  devicePathStates,  deviceScene.scene,  maxDepth,  russianRouletteStartDepth,  deviceFramebuffer);
+        shadePaths<<<blockCount, blockSize, 0, traceStream>>>(currentRayQueue,  deviceIntersectionResults,  nextRays,  devicePathStates,  deviceScene.scene,  maxDepth,  russianRouletteStartDepth,  renderSession.deviceFramebuffer);
 
         std::swap(currentRayQueue, nextRays);
     }
 
-    advanceSampleIndex<<<1, 1, 0, traceStream>>>(deviceSampleIndex);
+    advanceSampleIndex<<<1, 1, 0, traceStream>>>(renderSession.deviceSampleIndex);
 
     CUDA_CHECK(cudaStreamEndCapture(traceStream, &traceGraph));
     CUDA_CHECK(cudaGraphInstantiate(&traceGraphExec, traceGraph, nullptr, nullptr, 0));
@@ -157,10 +173,20 @@ int main() {
     CUDA_CHECK(cudaEventCreate(&traceEnd));
     CUDA_CHECK(cudaEventRecord(traceStart, traceStream));
 
-    for (uint32_t sample = 0; sample < samplesPerPixel; ++sample) {
+    uint32_t checkpointStepSamples = std::max(1u, (samplesPerPixel * checkpointProgressPercent + 99) / 100);
+
+    for (uint32_t sample = completedSamples; sample < samplesPerPixel; ++sample) {
         CUDA_CHECK(cudaGraphLaunch(traceGraphExec, traceStream));
 
         std::cout << "Completed sample " << sample + 1 << " of " << samplesPerPixel << '\n';
+
+        uint32_t newCompletedSamples = sample + 1;
+        if (newCompletedSamples % checkpointStepSamples == 0 || newCompletedSamples == samplesPerPixel) {
+            if (enqueueRenderSessionCheckpoint(*checkpointWriter, renderSession, newCompletedSamples, traceStream))
+                std::cout << "Queued checkpoint at " << newCompletedSamples << " of " << samplesPerPixel << " samples\n";
+            else
+                std::cout << "Skipped checkpoint at " << newCompletedSamples << " of " << samplesPerPixel << " samples because both checkpoint buffers are busy\n";
+        }
     }
 
     CUDA_CHECK(cudaEventRecord(traceEnd, traceStream));
@@ -175,10 +201,12 @@ int main() {
     // --------------------------------------------------------
 
     std::vector<Vec3> pixels(pixelCount);
-    CUDA_CHECK(cudaMemcpy(pixels.data(), deviceFramebuffer, sizeof(Vec3) * pixelCount, cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(pixels.data(), renderSession.deviceFramebuffer, sizeof(Vec3) * pixelCount, cudaMemcpyDeviceToHost));
+
+    uint32_t finalSampleCount = getRenderSessionSampleIndex(renderSession);
 
     for(Vec3& pixel: pixels) {
-        pixel = pixel / static_cast<float>(samplesPerPixel);
+        pixel = pixel / static_cast<float>(finalSampleCount);
     }
 
     constexpr char outputFilename[] = "render.ppm";
@@ -190,6 +218,7 @@ int main() {
     // Cleanup
     // --------------------------------------------------------
 
+    destroyAsyncCheckpointWriter(checkpointWriter);
     destroyDeviceScene(deviceScene);
 
     CUDA_CHECK(cudaGraphExecDestroy(traceGraphExec));
@@ -197,7 +226,7 @@ int main() {
     CUDA_CHECK(cudaStreamDestroy(traceStream));
 
     CUDA_CHECK(cudaFree(devicePathStates));
-    CUDA_CHECK(cudaFree(deviceFramebuffer));
+    destroyRenderSession(renderSession);
 
     CUDA_CHECK(cudaFree(deviceRays));
     CUDA_CHECK(cudaFree(deviceRayCount));
@@ -206,8 +235,6 @@ int main() {
     CUDA_CHECK(cudaFree(deviceNextRayCount));
 
     CUDA_CHECK(cudaFree(deviceIntersectionResults));
-    CUDA_CHECK(cudaFree(deviceSampleIndex));
-
     CUDA_CHECK(cudaEventDestroy(traceStart));
     CUDA_CHECK(cudaEventDestroy(traceEnd));
 
