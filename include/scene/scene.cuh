@@ -20,6 +20,7 @@ struct Scene {
     uint32_t bvhNodeCount;
 
     NXB::BVH2::DeviceView nexusBvh;
+    NXB::BVH8::DeviceView nexusBvh8;
 
     Material* materials;
     uint32_t materialCount;
@@ -33,6 +34,7 @@ struct DeviceScene {
     BvhNode* bvhNodes;
     uint32_t* bvhTriangleIndices;
     NXB::BVH2 nexusBvh;
+    NXB::BVH8 nexusBvh8;
     Material* materials;
 };
 

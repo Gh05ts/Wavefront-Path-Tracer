@@ -176,6 +176,26 @@ bool intersectNexusAabb(const Ray& ray, const NXB::AABB& bounds, float closestT,
     return intersectAabb(ray, localBounds, closestT, nearT);
 }
 
+__device__
+bool intersectNexusBvh8ChildAabb(const Ray& ray, const NXB::BVH8::NodeExplicit& node, uint32_t slot, float closestT, float& nearT) {
+    Vec3 cellSize(
+        ldexpf(1.0f, static_cast<int>(node.e[0]) - 127),
+        ldexpf(1.0f, static_cast<int>(node.e[1]) - 127),
+        ldexpf(1.0f, static_cast<int>(node.e[2]) - 127));
+
+    Aabb bounds;
+    bounds.minimum = Vec3(
+        node.p.x + static_cast<float>(node.qlox[slot]) * cellSize.x,
+        node.p.y + static_cast<float>(node.qloy[slot]) * cellSize.y,
+        node.p.z + static_cast<float>(node.qloz[slot]) * cellSize.z);
+    bounds.maximum = Vec3(
+        node.p.x + static_cast<float>(node.qhix[slot]) * cellSize.x,
+        node.p.y + static_cast<float>(node.qhiy[slot]) * cellSize.y,
+        node.p.z + static_cast<float>(node.qhiz[slot]) * cellSize.z);
+
+    return intersectAabb(ray, bounds, closestT, nearT);
+}
+
 __global__
 void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -205,7 +225,79 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
         }
     }
 
-    if (scene.nexusBvh.nodes != nullptr) {
+    if (scene.nexusBvh8.nodes != nullptr) {
+        constexpr uint32_t maxBvhStackSize = 96;
+        struct StackEntry {
+            uint32_t index;
+            uint32_t triangleCount;
+        };
+        StackEntry stack[maxBvhStackSize];
+        uint32_t stackSize = 1;
+        stack[0] = StackEntry{scene.nexusBvh8.nodeCount - 1, 0};
+
+        while (stackSize > 0) {
+            StackEntry entry = stack[--stackSize];
+
+            if (entry.triangleCount > 0) {
+                for (uint32_t i = 0; i < entry.triangleCount; ++i) {
+                    const Triangle& triangle = scene.triangles[scene.nexusBvh8.primIdx[entry.index + i]];
+                    float t;
+
+                    if (intersectTriangle(work.ray, triangle, t) && t < closestT) {
+                        closestT = t;
+                        closestMaterial = static_cast<int>(triangle.material);
+
+                        Vec3 edge1 = triangle.v1 - triangle.v0;
+                        Vec3 edge2 = triangle.v2 - triangle.v0;
+                        closestNormal = normalize(cross(edge1, edge2));
+
+                        if (dot(closestNormal, work.ray.direction) > 0.0f)
+                            closestNormal = -closestNormal;
+                    }
+                }
+
+                continue;
+            }
+
+            const NXB::BVH8::NodeExplicit& node = reinterpret_cast<const NXB::BVH8::NodeExplicit&>(scene.nexusBvh8.nodes[entry.index]);
+            StackEntry children[8];
+            float childNearT[8];
+            uint32_t childCount = 0;
+
+            for (uint32_t slot = 0; slot < 8; ++slot) {
+                uint8_t meta = node.meta[slot];
+                if (meta == 0)
+                    continue;
+
+                float nearT;
+                if (!intersectNexusBvh8ChildAabb(work.ray, node, slot, closestT, nearT))
+                    continue;
+
+                StackEntry child;
+                if ((node.imask >> slot) & 1) {
+                    child.index = node.childBaseIdx + __popc(node.imask & ((1u << slot) - 1));
+                    child.triangleCount = 0;
+                } else {
+                    child.index = node.primBaseIdx + (meta & 0x1f);
+                    child.triangleCount = __popc(meta >> 5);
+                }
+
+                uint32_t insertIndex = childCount++;
+                while (insertIndex > 0 && nearT < childNearT[insertIndex - 1]) {
+                    children[insertIndex] = children[insertIndex - 1];
+                    childNearT[insertIndex] = childNearT[insertIndex - 1];
+                    --insertIndex;
+                }
+                children[insertIndex] = child;
+                childNearT[insertIndex] = nearT;
+            }
+
+            for (uint32_t i = childCount; i > 0; --i) {
+                if (stackSize < maxBvhStackSize)
+                    stack[stackSize++] = children[i - 1];
+            }
+        }
+    } else if (scene.nexusBvh.nodes != nullptr) {
         constexpr uint32_t maxBvhStackSize = 64;
         uint32_t stack[maxBvhStackSize];
         uint32_t stackSize = 1;

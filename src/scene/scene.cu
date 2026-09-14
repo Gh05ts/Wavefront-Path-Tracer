@@ -135,6 +135,7 @@ DeviceScene createObjScene(const char* filename) {
 
     constexpr bool useSpatialSplitBvh = false;
     constexpr bool useNexusBvh = true;
+    constexpr bool useNexusBvh8 = true;
     DeviceScene deviceScene{};
     auto bvhBuildStart = std::chrono::steady_clock::now();
     HostBvh bvh;
@@ -152,7 +153,10 @@ DeviceScene createObjScene(const char* filename) {
         }
 
         NXB::DeviceBuffer<NXB::Triangle> deviceNexusTriangles(nexusTriangles);
-        deviceScene.nexusBvh = NXB::BuildBVH2(deviceNexusTriangles.Get(), static_cast<uint32_t>(nexusTriangles.size()), NXB::BuildConfig{}, &nexusMetrics);
+        if (useNexusBvh8)
+            deviceScene.nexusBvh8 = NXB::BuildBVH8(deviceNexusTriangles.Get(), static_cast<uint32_t>(nexusTriangles.size()), NXB::BuildConfig{}, &nexusMetrics);
+        else
+            deviceScene.nexusBvh = NXB::BuildBVH2(deviceNexusTriangles.Get(), static_cast<uint32_t>(nexusTriangles.size()), NXB::BuildConfig{}, &nexusMetrics);
     } else {
         bvh = useSpatialSplitBvh ? buildSpatialSplitBvh(mesh.triangles) : buildTriangleBvh(mesh.triangles);
     }
@@ -205,11 +209,15 @@ DeviceScene createObjScene(const char* filename) {
     deviceScene.scene.bvhTriangleIndices = deviceScene.bvhTriangleIndices;
     deviceScene.scene.bvhNodeCount = static_cast<uint32_t>(bvh.nodes.size());
     deviceScene.scene.nexusBvh = deviceScene.nexusBvh.View();
+    deviceScene.scene.nexusBvh8 = deviceScene.nexusBvh8.View();
     deviceScene.scene.materials = deviceScene.materials;
     deviceScene.scene.materialCount = static_cast<uint32_t>(hostMaterials.size());
 
     if (useNexusBvh) {
-        std::cout << "Built NexusBVH H-PLOC BVH2 with " << deviceScene.nexusBvh.NodeCount() << " nodes for " << mesh.triangles.size() << " triangles in " << bvhBuildMilliseconds << " ms\n";
+        if (useNexusBvh8)
+            std::cout << "Built NexusBVH H-PLOC BVH8 with " << deviceScene.nexusBvh8.NodeCount() << " nodes (average " << deviceScene.nexusBvh8.AverageChildPerNode() << " children) for " << mesh.triangles.size() << " triangles in " << bvhBuildMilliseconds << " ms\n";
+        else
+            std::cout << "Built NexusBVH H-PLOC BVH2 with " << deviceScene.nexusBvh.NodeCount() << " nodes for " << mesh.triangles.size() << " triangles in " << bvhBuildMilliseconds << " ms\n";
         std::cout << "  bounds " << nexusMetrics.computeSceneBoundsTime << " ms, morton " << nexusMetrics.computeMortonCodesTime << " ms, sort " << nexusMetrics.radixSortTime << " ms, build " << nexusMetrics.bvhBuildTime << " ms\n";
     } else {
         std::cout << "Built " << (useSpatialSplitBvh ? "SBVH" : "median BVH") << " with " << bvh.nodes.size() << " nodes for " << mesh.triangles.size() << " triangles in " << bvhBuildMilliseconds << " ms\n";
@@ -224,6 +232,7 @@ void destroyDeviceScene(DeviceScene& deviceScene) {
     checkCuda(cudaFree(deviceScene.bvhNodes));
     checkCuda(cudaFree(deviceScene.bvhTriangleIndices));
     deviceScene.nexusBvh = NXB::BVH2{};
+    deviceScene.nexusBvh8 = NXB::BVH8{};
     checkCuda(cudaFree(deviceScene.materials));
 
     deviceScene = DeviceScene{};
