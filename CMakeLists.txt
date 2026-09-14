@@ -14,12 +14,14 @@ add_executable(pathtracer
     src/core/rng.cu
     src/scene/camera.cu
     src/scene/scene.cu
+    src/scene/obj_loader.cpp
     src/renderer/renderer.cu
 )
 
 target_include_directories(pathtracer
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/extern/tinyobjloader
 )
 
 set_target_properties(pathtracer PROPERTIES

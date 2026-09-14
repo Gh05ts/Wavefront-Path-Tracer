@@ -1,9 +1,11 @@
 #include "scene/scene.cuh"
+#include "scene/obj_loader.hpp"
 
 #include <cuda_runtime.h>
 
 #include <cstdlib>
 #include <iostream>
+#include <vector>
 
 namespace
 {
@@ -110,6 +112,50 @@ DeviceScene createDemoScene() {
     deviceScene.scene.triangleCount = 18;
     deviceScene.scene.materials = deviceScene.materials;
     deviceScene.scene.materialCount = 4;
+
+    return deviceScene;
+}
+
+DeviceScene createObjScene(const char* filename) {
+    ObjMesh mesh = loadObjMesh(filename);
+
+    Sphere hostSpheres[1];
+    hostSpheres[0].center = Vec3(0.0f, -100.5f, 0.0f);
+    hostSpheres[0].radius = 100.0f;
+    hostSpheres[0].material = 0;
+
+    Material groundMaterial{};
+    groundMaterial.type = MaterialType::Diffuse;
+    groundMaterial.albedo = Vec3(0.75f, 0.75f, 0.75f);
+    groundMaterial.emission = Vec3(0.0f, 0.0f, 0.0f);
+    groundMaterial.roughness = 0.0f;
+    groundMaterial.ior = 1.0f;
+
+    std::vector<Material> hostMaterials;
+    hostMaterials.reserve(mesh.materials.size() + 1);
+    hostMaterials.push_back(groundMaterial);
+    hostMaterials.insert(hostMaterials.end(), mesh.materials.begin(), mesh.materials.end());
+
+    for (Triangle& triangle : mesh.triangles)
+        triangle.material += 1;
+
+    DeviceScene deviceScene{};
+
+    checkCuda(cudaMalloc(&deviceScene.spheres, sizeof(hostSpheres)));
+    checkCuda(cudaMemcpy(deviceScene.spheres, hostSpheres, sizeof(hostSpheres), cudaMemcpyHostToDevice));
+
+    checkCuda(cudaMalloc(&deviceScene.triangles, sizeof(Triangle) * mesh.triangles.size()));
+    checkCuda(cudaMemcpy(deviceScene.triangles, mesh.triangles.data(), sizeof(Triangle) * mesh.triangles.size(), cudaMemcpyHostToDevice));
+
+    checkCuda(cudaMalloc(&deviceScene.materials, sizeof(Material) * hostMaterials.size()));
+    checkCuda(cudaMemcpy(deviceScene.materials, hostMaterials.data(), sizeof(Material) * hostMaterials.size(), cudaMemcpyHostToDevice));
+
+    deviceScene.scene.spheres = deviceScene.spheres;
+    deviceScene.scene.sphereCount = 1;
+    deviceScene.scene.triangles = deviceScene.triangles;
+    deviceScene.scene.triangleCount = static_cast<uint32_t>(mesh.triangles.size());
+    deviceScene.scene.materials = deviceScene.materials;
+    deviceScene.scene.materialCount = static_cast<uint32_t>(hostMaterials.size());
 
     return deviceScene;
 }

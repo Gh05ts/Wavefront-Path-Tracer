@@ -57,7 +57,8 @@ int main() {
     std::cout << "Starting wavefront path tracer\n";
 
     Camera camera = createDemoCamera(width, height);
-    DeviceScene deviceScene = createDemoScene();
+    constexpr bool useObjScene = true;
+    DeviceScene deviceScene = useObjScene ? createObjScene("../assets/stanford-bunny.obj") : createDemoScene();
 
     // --------------------------------------------------------
     // Path states

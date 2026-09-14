@@ -25,5 +25,6 @@ struct DeviceScene {
 };
 
 DeviceScene createDemoScene();
+DeviceScene createObjScene(const char* filename);
 
 void destroyDeviceScene(DeviceScene& deviceScene);
