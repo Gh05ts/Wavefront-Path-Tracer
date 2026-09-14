@@ -150,6 +150,32 @@ bool intersectTriangle(const Ray& ray, const Triangle& triangle, float& t) {
     return t > tMin;
 }
 
+__device__
+bool intersectAabb(const Ray& ray, const Aabb& bounds, float closestT, float& nearT) {
+    Vec3 inverseDirection(1.0f / ray.direction.x, 1.0f / ray.direction.y, 1.0f / ray.direction.z);
+
+    float tx0 = (bounds.minimum.x - ray.origin.x) * inverseDirection.x;
+    float tx1 = (bounds.maximum.x - ray.origin.x) * inverseDirection.x;
+    float ty0 = (bounds.minimum.y - ray.origin.y) * inverseDirection.y;
+    float ty1 = (bounds.maximum.y - ray.origin.y) * inverseDirection.y;
+    float tz0 = (bounds.minimum.z - ray.origin.z) * inverseDirection.z;
+    float tz1 = (bounds.maximum.z - ray.origin.z) * inverseDirection.z;
+
+    float tmin = fmaxf(fminf(tx0, tx1), fmaxf(fminf(ty0, ty1), fminf(tz0, tz1)));
+    float tmax = fminf(fmaxf(tx0, tx1), fminf(fmaxf(ty0, ty1), fmaxf(tz0, tz1)));
+    nearT = tmin;
+
+    return tmax >= fmaxf(tmin, 0.001f) && tmin < closestT;
+}
+
+__device__
+bool intersectNexusAabb(const Ray& ray, const NXB::AABB& bounds, float closestT, float& nearT) {
+    Aabb localBounds;
+    localBounds.minimum = Vec3(bounds.bMin.x, bounds.bMin.y, bounds.bMin.z);
+    localBounds.maximum = Vec3(bounds.bMax.x, bounds.bMax.y, bounds.bMax.z);
+    return intersectAabb(ray, localBounds, closestT, nearT);
+}
+
 __global__
 void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -179,19 +205,115 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
         }
     }
 
-    for (uint32_t i = 0; i < scene.triangleCount; ++i) {
-        float t;
+    if (scene.nexusBvh.nodes != nullptr) {
+        constexpr uint32_t maxBvhStackSize = 64;
+        uint32_t stack[maxBvhStackSize];
+        uint32_t stackSize = 1;
+        stack[0] = scene.nexusBvh.nodeCount - 1;
 
-        if (intersectTriangle(work.ray, scene.triangles[i], t) && t < closestT) {
-            closestT = t;
-            closestMaterial = static_cast<int>(scene.triangles[i].material);
+        while (stackSize > 0) {
+            const NXB::BVH2::Node& node = scene.nexusBvh.nodes[stack[--stackSize]];
+            float nearT;
 
-            Vec3 edge1 = scene.triangles[i].v1 - scene.triangles[i].v0;
-            Vec3 edge2 = scene.triangles[i].v2 - scene.triangles[i].v0;
-            closestNormal = normalize(cross(edge1, edge2));
+            if (!intersectNexusAabb(work.ray, node.bounds, closestT, nearT))
+                continue;
 
-            if (dot(closestNormal, work.ray.direction) > 0.0f)
-                closestNormal = -closestNormal;
+            if (node.leftChild == NXB::InvalidIdx) {
+                const Triangle& triangle = scene.triangles[node.rightChild];
+                float t;
+
+                if (intersectTriangle(work.ray, triangle, t) && t < closestT) {
+                    closestT = t;
+                    closestMaterial = static_cast<int>(triangle.material);
+
+                    Vec3 edge1 = triangle.v1 - triangle.v0;
+                    Vec3 edge2 = triangle.v2 - triangle.v0;
+                    closestNormal = normalize(cross(edge1, edge2));
+
+                    if (dot(closestNormal, work.ray.direction) > 0.0f)
+                        closestNormal = -closestNormal;
+                }
+            } else {
+                float leftNearT;
+                float rightNearT;
+                bool hitLeft = intersectNexusAabb(work.ray, scene.nexusBvh.nodes[node.leftChild].bounds, closestT, leftNearT);
+                bool hitRight = intersectNexusAabb(work.ray, scene.nexusBvh.nodes[node.rightChild].bounds, closestT, rightNearT);
+
+                if (hitLeft && hitRight) {
+                    uint32_t nearChild = leftNearT < rightNearT ? node.leftChild : node.rightChild;
+                    uint32_t farChild = leftNearT < rightNearT ? node.rightChild : node.leftChild;
+                    stack[stackSize++] = farChild;
+                    stack[stackSize++] = nearChild;
+                } else if (hitLeft) {
+                    stack[stackSize++] = node.leftChild;
+                } else if (hitRight) {
+                    stack[stackSize++] = node.rightChild;
+                }
+            }
+        }
+    } else if (scene.bvhNodeCount > 0) {
+        constexpr uint32_t maxBvhStackSize = 64;
+        uint32_t stack[maxBvhStackSize];
+        uint32_t stackSize = 1;
+        stack[0] = 0;
+
+        while (stackSize > 0) {
+            const BvhNode& node = scene.bvhNodes[stack[--stackSize]];
+            float nearT;
+
+            if (!intersectAabb(work.ray, node.bounds, closestT, nearT))
+                continue;
+
+            if (node.triangleCount > 0) {
+                for (uint32_t i = 0; i < node.triangleCount; ++i) {
+                    const Triangle& triangle = scene.triangles[scene.bvhTriangleIndices[node.firstTriangle + i]];
+                    float t;
+
+                    if (intersectTriangle(work.ray, triangle, t) && t < closestT) {
+                        closestT = t;
+                        closestMaterial = static_cast<int>(triangle.material);
+
+                        Vec3 edge1 = triangle.v1 - triangle.v0;
+                        Vec3 edge2 = triangle.v2 - triangle.v0;
+                        closestNormal = normalize(cross(edge1, edge2));
+
+                        if (dot(closestNormal, work.ray.direction) > 0.0f)
+                            closestNormal = -closestNormal;
+                    }
+                }
+            } else {
+                float leftNearT;
+                float rightNearT;
+                bool hitLeft = intersectAabb(work.ray, scene.bvhNodes[node.leftChild].bounds, closestT, leftNearT);
+                bool hitRight = intersectAabb(work.ray, scene.bvhNodes[node.rightChild].bounds, closestT, rightNearT);
+
+                if (hitLeft && hitRight) {
+                    uint32_t nearChild = leftNearT < rightNearT ? node.leftChild : node.rightChild;
+                    uint32_t farChild = leftNearT < rightNearT ? node.rightChild : node.leftChild;
+                    stack[stackSize++] = farChild;
+                    stack[stackSize++] = nearChild;
+                } else if (hitLeft) {
+                    stack[stackSize++] = node.leftChild;
+                } else if (hitRight) {
+                    stack[stackSize++] = node.rightChild;
+                }
+            }
+        }
+    } else {
+        for (uint32_t i = 0; i < scene.triangleCount; ++i) {
+            float t;
+
+            if (intersectTriangle(work.ray, scene.triangles[i], t) && t < closestT) {
+                closestT = t;
+                closestMaterial = static_cast<int>(scene.triangles[i].material);
+
+                Vec3 edge1 = scene.triangles[i].v1 - scene.triangles[i].v0;
+                Vec3 edge2 = scene.triangles[i].v2 - scene.triangles[i].v0;
+                closestNormal = normalize(cross(edge1, edge2));
+
+                if (dot(closestNormal, work.ray.direction) > 0.0f)
+                    closestNormal = -closestNormal;
+            }
         }
     }
 

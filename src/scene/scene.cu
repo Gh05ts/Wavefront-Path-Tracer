@@ -1,10 +1,15 @@
 #include "scene/scene.cuh"
+#include "scene/bvh.cuh"
 #include "scene/obj_loader.hpp"
+
+#include <NXB/BVHBuilder.h>
 
 #include <cuda_runtime.h>
 
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <utility>
 #include <vector>
 
 namespace
@@ -119,6 +124,42 @@ DeviceScene createDemoScene() {
 DeviceScene createObjScene(const char* filename) {
     ObjMesh mesh = loadObjMesh(filename);
 
+    constexpr float objectScale = 8.0f;
+    const Vec3 objectTranslation(0.13f, -0.764f, 0.5f);
+
+    for (Triangle& triangle : mesh.triangles) {
+        triangle.v0 = objectScale * triangle.v0 + objectTranslation;
+        triangle.v1 = objectScale * triangle.v1 + objectTranslation;
+        triangle.v2 = objectScale * triangle.v2 + objectTranslation;
+    }
+
+    constexpr bool useSpatialSplitBvh = false;
+    constexpr bool useNexusBvh = true;
+    DeviceScene deviceScene{};
+    auto bvhBuildStart = std::chrono::steady_clock::now();
+    HostBvh bvh;
+    NXB::BVHBuildMetrics nexusMetrics{};
+
+    if (useNexusBvh) {
+        std::vector<NXB::Triangle> nexusTriangles;
+        nexusTriangles.reserve(mesh.triangles.size());
+
+        for (const Triangle& triangle : mesh.triangles) {
+            nexusTriangles.emplace_back(
+                make_float3(triangle.v0.x, triangle.v0.y, triangle.v0.z),
+                make_float3(triangle.v1.x, triangle.v1.y, triangle.v1.z),
+                make_float3(triangle.v2.x, triangle.v2.y, triangle.v2.z));
+        }
+
+        NXB::DeviceBuffer<NXB::Triangle> deviceNexusTriangles(nexusTriangles);
+        deviceScene.nexusBvh = NXB::BuildBVH2(deviceNexusTriangles.Get(), static_cast<uint32_t>(nexusTriangles.size()), NXB::BuildConfig{}, &nexusMetrics);
+    } else {
+        bvh = useSpatialSplitBvh ? buildSpatialSplitBvh(mesh.triangles) : buildTriangleBvh(mesh.triangles);
+    }
+
+    auto bvhBuildEnd = std::chrono::steady_clock::now();
+    float bvhBuildMilliseconds = std::chrono::duration<float, std::milli>(bvhBuildEnd - bvhBuildStart).count();
+
     Sphere hostSpheres[1];
     hostSpheres[0].center = Vec3(0.0f, -100.5f, 0.0f);
     hostSpheres[0].radius = 100.0f;
@@ -139,13 +180,19 @@ DeviceScene createObjScene(const char* filename) {
     for (Triangle& triangle : mesh.triangles)
         triangle.material += 1;
 
-    DeviceScene deviceScene{};
-
     checkCuda(cudaMalloc(&deviceScene.spheres, sizeof(hostSpheres)));
     checkCuda(cudaMemcpy(deviceScene.spheres, hostSpheres, sizeof(hostSpheres), cudaMemcpyHostToDevice));
 
     checkCuda(cudaMalloc(&deviceScene.triangles, sizeof(Triangle) * mesh.triangles.size()));
     checkCuda(cudaMemcpy(deviceScene.triangles, mesh.triangles.data(), sizeof(Triangle) * mesh.triangles.size(), cudaMemcpyHostToDevice));
+
+    if (!useNexusBvh) {
+        checkCuda(cudaMalloc(&deviceScene.bvhNodes, sizeof(BvhNode) * bvh.nodes.size()));
+        checkCuda(cudaMemcpy(deviceScene.bvhNodes, bvh.nodes.data(), sizeof(BvhNode) * bvh.nodes.size(), cudaMemcpyHostToDevice));
+
+        checkCuda(cudaMalloc(&deviceScene.bvhTriangleIndices, sizeof(uint32_t) * bvh.triangleIndices.size()));
+        checkCuda(cudaMemcpy(deviceScene.bvhTriangleIndices, bvh.triangleIndices.data(), sizeof(uint32_t) * bvh.triangleIndices.size(), cudaMemcpyHostToDevice));
+    }
 
     checkCuda(cudaMalloc(&deviceScene.materials, sizeof(Material) * hostMaterials.size()));
     checkCuda(cudaMemcpy(deviceScene.materials, hostMaterials.data(), sizeof(Material) * hostMaterials.size(), cudaMemcpyHostToDevice));
@@ -154,8 +201,19 @@ DeviceScene createObjScene(const char* filename) {
     deviceScene.scene.sphereCount = 1;
     deviceScene.scene.triangles = deviceScene.triangles;
     deviceScene.scene.triangleCount = static_cast<uint32_t>(mesh.triangles.size());
+    deviceScene.scene.bvhNodes = deviceScene.bvhNodes;
+    deviceScene.scene.bvhTriangleIndices = deviceScene.bvhTriangleIndices;
+    deviceScene.scene.bvhNodeCount = static_cast<uint32_t>(bvh.nodes.size());
+    deviceScene.scene.nexusBvh = deviceScene.nexusBvh.View();
     deviceScene.scene.materials = deviceScene.materials;
     deviceScene.scene.materialCount = static_cast<uint32_t>(hostMaterials.size());
+
+    if (useNexusBvh) {
+        std::cout << "Built NexusBVH H-PLOC BVH2 with " << deviceScene.nexusBvh.NodeCount() << " nodes for " << mesh.triangles.size() << " triangles in " << bvhBuildMilliseconds << " ms\n";
+        std::cout << "  bounds " << nexusMetrics.computeSceneBoundsTime << " ms, morton " << nexusMetrics.computeMortonCodesTime << " ms, sort " << nexusMetrics.radixSortTime << " ms, build " << nexusMetrics.bvhBuildTime << " ms\n";
+    } else {
+        std::cout << "Built " << (useSpatialSplitBvh ? "SBVH" : "median BVH") << " with " << bvh.nodes.size() << " nodes for " << mesh.triangles.size() << " triangles in " << bvhBuildMilliseconds << " ms\n";
+    }
 
     return deviceScene;
 }
@@ -163,6 +221,9 @@ DeviceScene createObjScene(const char* filename) {
 void destroyDeviceScene(DeviceScene& deviceScene) {
     checkCuda(cudaFree(deviceScene.spheres));
     checkCuda(cudaFree(deviceScene.triangles));
+    checkCuda(cudaFree(deviceScene.bvhNodes));
+    checkCuda(cudaFree(deviceScene.bvhTriangleIndices));
+    deviceScene.nexusBvh = NXB::BVH2{};
     checkCuda(cudaFree(deviceScene.materials));
 
     deviceScene = DeviceScene{};

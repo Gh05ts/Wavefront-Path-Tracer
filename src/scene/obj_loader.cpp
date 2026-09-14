@@ -24,7 +24,7 @@ Material makeMaterial(const tinyobj::material_t& source) {
 Material makeDefaultMaterial() {
     Material material{};
     material.type = MaterialType::Diffuse;
-    material.albedo = Vec3(0.7f, 0.7f, 0.7f);
+    material.albedo = Vec3(0.65f, 0.3f, 0.18f);
     material.emission = Vec3(0.0f, 0.0f, 0.0f);
     material.roughness = 0.0f;
     material.ior = 1.0f;
