@@ -118,7 +118,7 @@ int main() {
     constexpr bool resumeFromCheckpoint = false;
     constexpr char checkpointFilename[] = "render.checkpoint";
     constexpr uint32_t checkpointProgressPercent = 25;
-    constexpr uint32_t checkpointBufferCount = 4;
+    constexpr uint32_t checkpointBufferCount = 3;
 
     cudaStream_t traceStream;
     CUDA_CHECK(cudaStreamCreateWithFlags(&traceStream, cudaStreamNonBlocking));
@@ -181,7 +181,7 @@ int main() {
         std::cout << "Completed sample " << sample + 1 << " of " << samplesPerPixel << '\n';
 
         uint32_t newCompletedSamples = sample + 1;
-        if (newCompletedSamples % checkpointStepSamples == 0 || newCompletedSamples == samplesPerPixel) {
+        if (newCompletedSamples % checkpointStepSamples == 0 && newCompletedSamples < samplesPerPixel) {
             if (enqueueRenderSessionCheckpoint(*checkpointWriter, renderSession, newCompletedSamples, traceStream))
                 std::cout << "Queued checkpoint at " << newCompletedSamples << " of " << samplesPerPixel << " samples\n";
             else
