@@ -27,6 +27,9 @@ struct Scene {
     Triangle* triangles;
     uint32_t triangleCount;
 
+    Triangle* staticTriangles;
+    uint32_t staticTriangleCount;
+
     BvhNode* bvhNodes;
     uint32_t* bvhTriangleIndices;
     uint32_t bvhNodeCount;
@@ -42,6 +45,10 @@ struct Scene {
 
     Material* materials;
     uint32_t materialCount;
+
+    AreaLight areaLight;
+    bool hasAreaLight;
+    bool blackBackground;
 };
 
 struct DeviceScene {
@@ -49,6 +56,7 @@ struct DeviceScene {
 
     Sphere* spheres;
     Triangle* triangles;
+    Triangle* staticTriangles;
     BvhNode* bvhNodes;
     uint32_t* bvhTriangleIndices;
     NXB::BVH2 nexusBvh;
@@ -62,5 +70,6 @@ struct DeviceScene {
 
 DeviceScene createDemoScene();
 DeviceScene createObjScene(const char* filename);
+DeviceScene createCornellScene(const char* filename);
 
 void destroyDeviceScene(DeviceScene& deviceScene);

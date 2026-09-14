@@ -24,6 +24,7 @@ add_executable(pathtracer
     src/renderer/renderer.cu
     src/renderer/render_session.cu
     src/renderer/render_checkpoint.cpp
+    src/renderer/tile_scheduler.cpp
 )
 
 target_include_directories(pathtracer

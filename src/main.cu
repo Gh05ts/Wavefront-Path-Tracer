@@ -54,19 +54,25 @@ int main() {
     constexpr uint32_t width = 1920;
     constexpr uint32_t height = 1080;
     constexpr uint32_t pixelCount = width * height;
+    constexpr bool useTiledRendering = false;
+    constexpr uint32_t tileWidth = 960;
+    constexpr uint32_t tileHeight = 540;
+    constexpr uint32_t renderQueueCapacity = useTiledRendering ? tileWidth * tileHeight : pixelCount;
 
     std::cout << "Starting wavefront path tracer\n";
 
-    Camera camera = createDemoCamera(width, height);
+    constexpr bool useCornellScene = true;
+    Camera camera = useCornellScene ? createCornellCamera(width, height) : createDemoCamera(width, height);
     constexpr bool useObjScene = true;
-    DeviceScene deviceScene = useObjScene ? createObjScene("../assets/stanford-bunny.obj") : createDemoScene();
+    DeviceScene deviceScene = useCornellScene ? createCornellScene("../assets/stanford-bunny.obj") :
+        (useObjScene ? createObjScene("../assets/stanford-bunny.obj") : createDemoScene());
 
     // --------------------------------------------------------
     // Path states
     // --------------------------------------------------------
 
     PathState* devicePathStates = nullptr;
-    CUDA_CHECK(cudaMalloc(&devicePathStates, sizeof(PathState) * pixelCount));
+    CUDA_CHECK(cudaMalloc(&devicePathStates, sizeof(PathState) * renderQueueCapacity));
 
     RenderSession renderSession = createRenderSession(width, height);
 
@@ -75,7 +81,7 @@ int main() {
     // --------------------------------------------------------
 
     RayWorkItem* deviceRays = nullptr;
-    CUDA_CHECK(cudaMalloc(&deviceRays, sizeof(RayWorkItem) * pixelCount));
+    CUDA_CHECK(cudaMalloc(&deviceRays, sizeof(RayWorkItem) * renderQueueCapacity));
 
     uint32_t* deviceRayCount = nullptr;
     CUDA_CHECK(cudaMalloc(&deviceRayCount, sizeof(uint32_t)));
@@ -84,10 +90,10 @@ int main() {
 
     rayQueue.items = deviceRays;
     rayQueue.count = deviceRayCount;
-    rayQueue.capacity = pixelCount;
+    rayQueue.capacity = renderQueueCapacity;
 
     RayWorkItem* deviceNextRays = nullptr;
-    CUDA_CHECK(cudaMalloc(&deviceNextRays, sizeof(RayWorkItem) * pixelCount));
+    CUDA_CHECK(cudaMalloc(&deviceNextRays, sizeof(RayWorkItem) * renderQueueCapacity));
 
     uint32_t* deviceNextRayCount = nullptr;
     CUDA_CHECK(cudaMalloc(&deviceNextRayCount, sizeof(uint32_t)));
@@ -96,17 +102,32 @@ int main() {
 
     nextRayQueue.items = deviceNextRays;
     nextRayQueue.count = deviceNextRayCount;
-    nextRayQueue.capacity = pixelCount;
+    nextRayQueue.capacity = renderQueueCapacity;
 
     IntersectionResult* deviceIntersectionResults = nullptr;
-    CUDA_CHECK(cudaMalloc(&deviceIntersectionResults, sizeof(IntersectionResult) * pixelCount));
+    CUDA_CHECK(cudaMalloc(&deviceIntersectionResults, sizeof(IntersectionResult) * renderQueueCapacity));
 
     // --------------------------------------------------------
     // Generate primary rays
     // --------------------------------------------------------
 
     constexpr uint32_t blockSize = 256;
-    uint32_t blockCount = (pixelCount + blockSize - 1) / blockSize;
+    uint32_t blockCount = (renderQueueCapacity + blockSize - 1) / blockSize;
+
+    std::vector<RenderTile> renderTiles = useTiledRendering ?
+        createRenderTiles(width, height, tileWidth, tileHeight) :
+        createRenderTiles(width, height, width, height);
+
+    std::cout << "Render mode: " << (useTiledRendering ? "tiled" : "full frame")
+              << ", " << renderTiles.size() << " work tiles";
+
+    if (useTiledRendering)
+        std::cout << " at " << tileWidth << 'x' << tileHeight;
+
+    std::cout << '\n';
+
+    RenderTile* deviceRenderTile = nullptr;
+    CUDA_CHECK(cudaMalloc(&deviceRenderTile, sizeof(RenderTile)));
 
     // --------------------------------------------------------
     // Trace samples and path bounces
@@ -114,7 +135,7 @@ int main() {
 
     constexpr uint32_t maxDepth = 8;
     constexpr uint32_t russianRouletteStartDepth = 3;
-    constexpr uint32_t samplesPerPixel = 64;
+    constexpr uint32_t samplesPerPixel = 512;
     constexpr bool resumeFromCheckpoint = false;
     constexpr char checkpointFilename[] = "render.checkpoint";
     constexpr uint32_t checkpointProgressPercent = 25;
@@ -148,7 +169,7 @@ int main() {
     CUDA_CHECK(cudaStreamBeginCapture(traceStream, cudaStreamCaptureModeGlobal));
 
     CUDA_CHECK(cudaMemsetAsync(deviceRayCount, 0, sizeof(uint32_t), traceStream));
-    generatePrimaryRays<<<blockCount, blockSize, 0, traceStream>>>(rayQueue,  devicePathStates,  camera,  width,  height,  renderSession.deviceSampleIndex);
+    generatePrimaryRays<<<blockCount, blockSize, 0, traceStream>>>(rayQueue,  devicePathStates,  camera,  width,  height,  renderSession.deviceSampleIndex,  deviceRenderTile);
 
     RayQueue currentRayQueue = rayQueue;
     RayQueue nextRays = nextRayQueue;
@@ -162,7 +183,7 @@ int main() {
         std::swap(currentRayQueue, nextRays);
     }
 
-    advanceSampleIndex<<<1, 1, 0, traceStream>>>(renderSession.deviceSampleIndex);
+    advanceSampleIndex<<<1, 1, 0, traceStream>>>(renderSession.deviceSampleIndex, deviceRenderTile);
 
     CUDA_CHECK(cudaStreamEndCapture(traceStream, &traceGraph));
     CUDA_CHECK(cudaGraphInstantiate(&traceGraphExec, traceGraph, nullptr, nullptr, 0));
@@ -176,7 +197,13 @@ int main() {
     uint32_t checkpointStepSamples = std::max(1u, (samplesPerPixel * checkpointProgressPercent + 99) / 100);
 
     for (uint32_t sample = completedSamples; sample < samplesPerPixel; ++sample) {
-        CUDA_CHECK(cudaGraphLaunch(traceGraphExec, traceStream));
+        for (uint32_t tileIndex = 0; tileIndex < renderTiles.size(); ++tileIndex) {
+            RenderTile renderTile = renderTiles[tileIndex];
+            renderTile.advanceSample = tileIndex + 1 == renderTiles.size();
+
+            CUDA_CHECK(cudaMemcpyAsync(deviceRenderTile, &renderTile, sizeof(RenderTile), cudaMemcpyHostToDevice, traceStream));
+            CUDA_CHECK(cudaGraphLaunch(traceGraphExec, traceStream));
+        }
 
         std::cout << "Completed sample " << sample + 1 << " of " << samplesPerPixel << '\n';
 
@@ -194,7 +221,7 @@ int main() {
 
     float traceMilliseconds = 0.0f;
     CUDA_CHECK(cudaEventElapsedTime(&traceMilliseconds, traceStart, traceEnd));
-    std::cout << "Trace time: " << traceMilliseconds << " ms\n";
+    std::cout << "Trace time (" << (useTiledRendering ? "tiled" : "full frame") << "): " << traceMilliseconds << " ms\n";
 
     // --------------------------------------------------------
     // Resolve framebuffer and write image
@@ -235,6 +262,7 @@ int main() {
     CUDA_CHECK(cudaFree(deviceNextRayCount));
 
     CUDA_CHECK(cudaFree(deviceIntersectionResults));
+    CUDA_CHECK(cudaFree(deviceRenderTile));
     CUDA_CHECK(cudaEventDestroy(traceStart));
     CUDA_CHECK(cudaEventDestroy(traceEnd));
 

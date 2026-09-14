@@ -6,6 +6,7 @@
 #include "../scene/scene.cuh"
 #include "path_state.cuh"
 #include "queues.cuh"
+#include "tile_scheduler.cuh"
 
 __global__
 void generatePrimaryRays(
@@ -14,11 +15,12 @@ void generatePrimaryRays(
     Camera camera,
     uint32_t width,
     uint32_t height,
-    const uint32_t* sampleIndex
+    const uint32_t* sampleIndex,
+    const RenderTile* tile
 );
 
 __global__
-void advanceSampleIndex(uint32_t* sampleIndex);
+void advanceSampleIndex(uint32_t* sampleIndex, const RenderTile* tile);
 
 __global__
 void intersectScene(

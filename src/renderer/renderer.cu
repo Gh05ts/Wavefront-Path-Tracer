@@ -4,15 +4,17 @@
 #include <cmath>
 
 __global__
-void generatePrimaryRays(RayQueue queue, PathState* pathStates, Camera camera, uint32_t width, uint32_t height, const uint32_t* sampleIndex) {
-    uint32_t pixel = blockIdx.x * blockDim.x + threadIdx.x;
-    uint32_t pixelCount = width * height;
+void generatePrimaryRays(RayQueue queue, PathState* pathStates, Camera camera, uint32_t width, uint32_t height, const uint32_t* sampleIndex, const RenderTile* tile) {
+    uint32_t localPixel = blockIdx.x * blockDim.x + threadIdx.x;
+    RenderTile renderTile = *tile;
+    uint32_t tilePixelCount = renderTile.width * renderTile.height;
 
-    if (pixel >= pixelCount)
+    if (localPixel >= tilePixelCount)
         return;
 
-    uint32_t x = pixel % width;
-    uint32_t y = pixel / width;
+    uint32_t x = renderTile.x + localPixel % renderTile.width;
+    uint32_t y = renderTile.y + localPixel / renderTile.width;
+    uint32_t pixel = y * width + x;
 
     uint32_t rngState = makeRngSeed(pixel ^ (*sampleIndex * 0x9e3779b9u));
 
@@ -21,19 +23,20 @@ void generatePrimaryRays(RayQueue queue, PathState* pathStates, Camera camera, u
 
     Ray ray = camera.generateRay(u, v);
 
-    pathStates[pixel] = PathState{ray, Vec3(1.0f, 1.0f, 1.0f), Vec3(0.0f, 0.0f, 0.0f), pixel, 0, rngState, true};
+    pathStates[localPixel] = PathState{ray, Vec3(1.0f, 1.0f, 1.0f), Vec3(0.0f, 0.0f, 0.0f), pixel, 0, rngState, true};
 
     uint32_t outputIndex = atomicAdd(queue.count, 1);
 
     if (outputIndex >= queue.capacity)
         return;
 
-    queue.items[outputIndex] = RayWorkItem{ray, pixel};
+    queue.items[outputIndex] = RayWorkItem{ray, localPixel};
 }
 
 __global__
-void advanceSampleIndex(uint32_t* sampleIndex) {
-    ++*sampleIndex;
+void advanceSampleIndex(uint32_t* sampleIndex, const RenderTile* tile) {
+    if (tile->advanceSample)
+        ++*sampleIndex;
 }
 
 __device__
@@ -274,6 +277,23 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
 
                 closestNormal = normalize(position - scene.spheres[i].center);
             }
+        }
+    }
+
+    for (uint32_t i = 0; i < scene.staticTriangleCount; ++i) {
+        const Triangle& triangle = scene.staticTriangles[i];
+        float t;
+
+        if (intersectTriangle(work.ray, triangle, t) && t < closestT) {
+            closestT = t;
+            closestMaterial = static_cast<int>(triangle.material);
+
+            Vec3 edge1 = triangle.v1 - triangle.v0;
+            Vec3 edge2 = triangle.v2 - triangle.v0;
+            closestNormal = normalize(cross(edge1, edge2));
+
+            if (dot(closestNormal, work.ray.direction) > 0.0f)
+                closestNormal = -closestNormal;
         }
     }
 
@@ -534,9 +554,11 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
         PathState& path = pathStates[work.pathIndex];
 
         if (!results[index].didHit) {
-            float t = 0.5f * (path.ray.direction.y + 1.0f);
-            Vec3 sky = (1.0f - t) * Vec3(1.0f, 1.0f, 1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
-            path.radiance += hadamard(path.throughput, sky);
+            if (!scene.blackBackground) {
+                float t = 0.5f * (path.ray.direction.y + 1.0f);
+                Vec3 sky = (1.0f - t) * Vec3(1.0f, 1.0f, 1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
+                path.radiance += hadamard(path.throughput, sky);
+            }
             path.active = false;
             framebuffer[path.pixelIndex] += path.radiance;
         } else {

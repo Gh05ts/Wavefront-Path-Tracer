@@ -24,6 +24,21 @@ void checkCuda(cudaError_t error) {
 Triangle makeTriangle(const Vec3& v0, const Vec3& v1, const Vec3& v2, uint32_t material) {
     return Triangle{v0, v1, v2, material};
 }
+
+void addQuad(std::vector<Triangle>& triangles, const Vec3& v0, const Vec3& v1, const Vec3& v2, const Vec3& v3, uint32_t material) {
+    triangles.push_back(makeTriangle(v0, v1, v2, material));
+    triangles.push_back(makeTriangle(v0, v2, v3, material));
+}
+
+Material makeMaterial(MaterialType type, const Vec3& albedo, const Vec3& emission = Vec3(0.0f, 0.0f, 0.0f)) {
+    Material material{};
+    material.type = type;
+    material.albedo = albedo;
+    material.emission = emission;
+    material.roughness = 0.0f;
+    material.ior = 1.0f;
+    return material;
+}
 } // namespace
 
 DeviceScene createDemoScene() {
@@ -117,6 +132,123 @@ DeviceScene createDemoScene() {
     deviceScene.scene.triangleCount = 18;
     deviceScene.scene.materials = deviceScene.materials;
     deviceScene.scene.materialCount = 4;
+
+    return deviceScene;
+}
+
+DeviceScene createCornellScene(const char* filename) {
+    ObjMesh mesh = loadObjMesh(filename);
+
+    constexpr float objectScale = 8.0f;
+    const Vec3 objectTranslation(0.13f, -0.764f, 0.5f);
+
+    for (Triangle& triangle : mesh.triangles)
+        triangle.material = 3;
+
+    DeviceScene deviceScene{};
+    auto bvhBuildStart = std::chrono::steady_clock::now();
+    std::vector<NXB::Triangle> nexusTriangles;
+    nexusTriangles.reserve(mesh.triangles.size());
+
+    for (const Triangle& triangle : mesh.triangles) {
+        nexusTriangles.emplace_back(
+            make_float3(triangle.v0.x, triangle.v0.y, triangle.v0.z),
+            make_float3(triangle.v1.x, triangle.v1.y, triangle.v1.z),
+            make_float3(triangle.v2.x, triangle.v2.y, triangle.v2.z));
+    }
+
+    NXB::BVHBuildMetrics blasMetrics{};
+    NXB::DeviceBuffer<NXB::Triangle> deviceNexusTriangles(nexusTriangles);
+    deviceScene.blasBvhs.push_back(NXB::BuildBVH2(deviceNexusTriangles.Get(), static_cast<uint32_t>(nexusTriangles.size()), NXB::BuildConfig{}, &blasMetrics));
+
+    const NXB::AABB& localBounds = deviceScene.blasBvhs[0].Bounds();
+    NXB::AABB instanceBounds(
+        make_float3(objectScale * localBounds.bMin.x + objectTranslation.x, objectScale * localBounds.bMin.y + objectTranslation.y, objectScale * localBounds.bMin.z + objectTranslation.z),
+        make_float3(objectScale * localBounds.bMax.x + objectTranslation.x, objectScale * localBounds.bMax.y + objectTranslation.y, objectScale * localBounds.bMax.z + objectTranslation.z));
+    NXB::BVHBuildMetrics tlasMetrics{};
+    NXB::DeviceBuffer<NXB::AABB> deviceInstanceBounds(std::vector<NXB::AABB>{instanceBounds});
+    deviceScene.tlas = NXB::BuildBVH2(deviceInstanceBounds.Get(), 1, NXB::BuildConfig{}, &tlasMetrics);
+    auto bvhBuildEnd = std::chrono::steady_clock::now();
+
+    std::vector<Triangle> hostStaticTriangles;
+    hostStaticTriangles.reserve(12);
+
+    constexpr float roomHalfWidth = 2.5f;
+    constexpr float floorY = -1.0f;
+    constexpr float ceilingY = 3.0f;
+    constexpr float backZ = -2.5f;
+    constexpr float frontZ = 2.5f;
+
+    addQuad(hostStaticTriangles,
+        Vec3(-roomHalfWidth, floorY, frontZ), Vec3(roomHalfWidth, floorY, frontZ),
+        Vec3(roomHalfWidth, floorY, backZ), Vec3(-roomHalfWidth, floorY, backZ), 0);
+    addQuad(hostStaticTriangles,
+        Vec3(-roomHalfWidth, ceilingY, backZ), Vec3(roomHalfWidth, ceilingY, backZ),
+        Vec3(roomHalfWidth, ceilingY, frontZ), Vec3(-roomHalfWidth, ceilingY, frontZ), 0);
+    addQuad(hostStaticTriangles,
+        Vec3(-roomHalfWidth, floorY, backZ), Vec3(roomHalfWidth, floorY, backZ),
+        Vec3(roomHalfWidth, ceilingY, backZ), Vec3(-roomHalfWidth, ceilingY, backZ), 0);
+    addQuad(hostStaticTriangles,
+        Vec3(-roomHalfWidth, floorY, frontZ), Vec3(-roomHalfWidth, floorY, backZ),
+        Vec3(-roomHalfWidth, ceilingY, backZ), Vec3(-roomHalfWidth, ceilingY, frontZ), 1);
+    addQuad(hostStaticTriangles,
+        Vec3(roomHalfWidth, floorY, backZ), Vec3(roomHalfWidth, floorY, frontZ),
+        Vec3(roomHalfWidth, ceilingY, frontZ), Vec3(roomHalfWidth, ceilingY, backZ), 2);
+
+    const Vec3 lightCorner(-0.75f, 2.95f, -0.75f);
+    const Vec3 lightEdgeU(1.5f, 0.0f, 0.0f);
+    const Vec3 lightEdgeV(0.0f, 0.0f, 1.5f);
+    addQuad(hostStaticTriangles,
+        lightCorner, lightCorner + lightEdgeU, lightCorner + lightEdgeU + lightEdgeV, lightCorner + lightEdgeV, 4);
+
+    std::vector<Material> hostMaterials;
+    hostMaterials.reserve(5);
+    hostMaterials.push_back(makeMaterial(MaterialType::Diffuse, Vec3(0.73f, 0.73f, 0.73f)));
+    hostMaterials.push_back(makeMaterial(MaterialType::Diffuse, Vec3(0.65f, 0.05f, 0.05f)));
+    hostMaterials.push_back(makeMaterial(MaterialType::Diffuse, Vec3(0.12f, 0.45f, 0.15f)));
+    hostMaterials.push_back(makeMaterial(MaterialType::Diffuse, Vec3(0.72f, 0.72f, 0.72f)));
+    hostMaterials.push_back(makeMaterial(MaterialType::Emissive, Vec3(1.0f, 1.0f, 1.0f), Vec3(16.0f, 16.0f, 16.0f)));
+
+    checkCuda(cudaMalloc(&deviceScene.triangles, sizeof(Triangle) * mesh.triangles.size()));
+    checkCuda(cudaMemcpy(deviceScene.triangles, mesh.triangles.data(), sizeof(Triangle) * mesh.triangles.size(), cudaMemcpyHostToDevice));
+    checkCuda(cudaMalloc(&deviceScene.staticTriangles, sizeof(Triangle) * hostStaticTriangles.size()));
+    checkCuda(cudaMemcpy(deviceScene.staticTriangles, hostStaticTriangles.data(), sizeof(Triangle) * hostStaticTriangles.size(), cudaMemcpyHostToDevice));
+    checkCuda(cudaMalloc(&deviceScene.materials, sizeof(Material) * hostMaterials.size()));
+    checkCuda(cudaMemcpy(deviceScene.materials, hostMaterials.data(), sizeof(Material) * hostMaterials.size(), cudaMemcpyHostToDevice));
+
+    Blas hostBlas{};
+    hostBlas.triangles = deviceScene.triangles;
+    hostBlas.bvh = deviceScene.blasBvhs[0].View();
+
+    MeshInstance hostInstance{};
+    hostInstance.blasIndex = 0;
+    hostInstance.translation = objectTranslation;
+    hostInstance.scale = objectScale;
+
+    checkCuda(cudaMalloc(&deviceScene.blases, sizeof(hostBlas)));
+    checkCuda(cudaMemcpy(deviceScene.blases, &hostBlas, sizeof(hostBlas), cudaMemcpyHostToDevice));
+    checkCuda(cudaMalloc(&deviceScene.instances, sizeof(hostInstance)));
+    checkCuda(cudaMemcpy(deviceScene.instances, &hostInstance, sizeof(hostInstance), cudaMemcpyHostToDevice));
+
+    deviceScene.scene.triangles = deviceScene.triangles;
+    deviceScene.scene.triangleCount = static_cast<uint32_t>(mesh.triangles.size());
+    deviceScene.scene.staticTriangles = deviceScene.staticTriangles;
+    deviceScene.scene.staticTriangleCount = static_cast<uint32_t>(hostStaticTriangles.size());
+    deviceScene.scene.tlas = deviceScene.tlas.View();
+    deviceScene.scene.blases = deviceScene.blases;
+    deviceScene.scene.blasCount = 1;
+    deviceScene.scene.instances = deviceScene.instances;
+    deviceScene.scene.instanceCount = 1;
+    deviceScene.scene.materials = deviceScene.materials;
+    deviceScene.scene.materialCount = static_cast<uint32_t>(hostMaterials.size());
+    deviceScene.scene.areaLight = AreaLight{lightCorner, lightEdgeU, lightEdgeV, Vec3(0.0f, -1.0f, 0.0f), length(cross(lightEdgeU, lightEdgeV)), 4};
+    deviceScene.scene.hasAreaLight = true;
+    deviceScene.scene.blackBackground = true;
+
+    float bvhBuildMilliseconds = std::chrono::duration<float, std::milli>(bvhBuildEnd - bvhBuildStart).count();
+    std::cout << "Built Cornell TLAS/BLAS BVH2 with " << deviceScene.blasBvhs[0].NodeCount() << " BLAS nodes and " << deviceScene.tlas.NodeCount() << " TLAS nodes for " << mesh.triangles.size() << " bunny triangles in " << bvhBuildMilliseconds << " ms\n";
+    std::cout << "  BLAS bounds " << blasMetrics.computeSceneBoundsTime << " ms, morton " << blasMetrics.computeMortonCodesTime << " ms, sort " << blasMetrics.radixSortTime << " ms, build " << blasMetrics.bvhBuildTime << " ms\n";
+    std::cout << "  TLAS bounds " << tlasMetrics.computeSceneBoundsTime << " ms, morton " << tlasMetrics.computeMortonCodesTime << " ms, sort " << tlasMetrics.radixSortTime << " ms, build " << tlasMetrics.bvhBuildTime << " ms\n";
 
     return deviceScene;
 }
@@ -279,6 +411,7 @@ DeviceScene createObjScene(const char* filename) {
 void destroyDeviceScene(DeviceScene& deviceScene) {
     checkCuda(cudaFree(deviceScene.spheres));
     checkCuda(cudaFree(deviceScene.triangles));
+    checkCuda(cudaFree(deviceScene.staticTriangles));
     checkCuda(cudaFree(deviceScene.bvhNodes));
     checkCuda(cudaFree(deviceScene.bvhTriangleIndices));
     deviceScene.nexusBvh = NXB::BVH2{};
