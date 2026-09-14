@@ -151,15 +151,13 @@ bool intersectTriangle(const Ray& ray, const Triangle& triangle, float& t) {
 }
 
 __device__
-bool intersectAabb(const Ray& ray, const Aabb& bounds, float closestT, float& nearT) {
-    Vec3 inverseDirection(1.0f / ray.direction.x, 1.0f / ray.direction.y, 1.0f / ray.direction.z);
-
-    float tx0 = (bounds.minimum.x - ray.origin.x) * inverseDirection.x;
-    float tx1 = (bounds.maximum.x - ray.origin.x) * inverseDirection.x;
-    float ty0 = (bounds.minimum.y - ray.origin.y) * inverseDirection.y;
-    float ty1 = (bounds.maximum.y - ray.origin.y) * inverseDirection.y;
-    float tz0 = (bounds.minimum.z - ray.origin.z) * inverseDirection.z;
-    float tz1 = (bounds.maximum.z - ray.origin.z) * inverseDirection.z;
+bool intersectAabb(const Ray& ray, const Vec3& inverseDirection, float minimumX, float minimumY, float minimumZ, float maximumX, float maximumY, float maximumZ, float closestT, float& nearT) {
+    float tx0 = (minimumX - ray.origin.x) * inverseDirection.x;
+    float tx1 = (maximumX - ray.origin.x) * inverseDirection.x;
+    float ty0 = (minimumY - ray.origin.y) * inverseDirection.y;
+    float ty1 = (maximumY - ray.origin.y) * inverseDirection.y;
+    float tz0 = (minimumZ - ray.origin.z) * inverseDirection.z;
+    float tz1 = (maximumZ - ray.origin.z) * inverseDirection.z;
 
     float tmin = fmaxf(fminf(tx0, tx1), fmaxf(fminf(ty0, ty1), fminf(tz0, tz1)));
     float tmax = fminf(fmaxf(tx0, tx1), fminf(fmaxf(ty0, ty1), fmaxf(tz0, tz1)));
@@ -169,31 +167,36 @@ bool intersectAabb(const Ray& ray, const Aabb& bounds, float closestT, float& ne
 }
 
 __device__
-bool intersectNexusAabb(const Ray& ray, const NXB::AABB& bounds, float closestT, float& nearT) {
-    Aabb localBounds;
-    localBounds.minimum = Vec3(bounds.bMin.x, bounds.bMin.y, bounds.bMin.z);
-    localBounds.maximum = Vec3(bounds.bMax.x, bounds.bMax.y, bounds.bMax.z);
-    return intersectAabb(ray, localBounds, closestT, nearT);
+bool intersectAabb(const Ray& ray, const Aabb& bounds, float closestT, float& nearT) {
+    Vec3 inverseDirection(1.0f / ray.direction.x, 1.0f / ray.direction.y, 1.0f / ray.direction.z);
+    return intersectAabb(ray, inverseDirection,
+        bounds.minimum.x, bounds.minimum.y, bounds.minimum.z,
+        bounds.maximum.x, bounds.maximum.y, bounds.maximum.z,
+        closestT, nearT);
 }
 
 __device__
-bool intersectNexusBvh8ChildAabb(const Ray& ray, const NXB::BVH8::NodeExplicit& node, uint32_t slot, float closestT, float& nearT) {
-    Vec3 cellSize(
-        ldexpf(1.0f, static_cast<int>(node.e[0]) - 127),
-        ldexpf(1.0f, static_cast<int>(node.e[1]) - 127),
-        ldexpf(1.0f, static_cast<int>(node.e[2]) - 127));
+bool intersectNexusAabb(const Ray& ray, const NXB::AABB& bounds, float closestT, float& nearT) {
+    Vec3 inverseDirection(1.0f / ray.direction.x, 1.0f / ray.direction.y, 1.0f / ray.direction.z);
+    return intersectAabb(ray, inverseDirection,
+        bounds.bMin.x, bounds.bMin.y, bounds.bMin.z,
+        bounds.bMax.x, bounds.bMax.y, bounds.bMax.z,
+        closestT, nearT);
+}
 
-    Aabb bounds;
-    bounds.minimum = Vec3(
-        node.p.x + static_cast<float>(node.qlox[slot]) * cellSize.x,
-        node.p.y + static_cast<float>(node.qloy[slot]) * cellSize.y,
-        node.p.z + static_cast<float>(node.qloz[slot]) * cellSize.z);
-    bounds.maximum = Vec3(
-        node.p.x + static_cast<float>(node.qhix[slot]) * cellSize.x,
-        node.p.y + static_cast<float>(node.qhiy[slot]) * cellSize.y,
-        node.p.z + static_cast<float>(node.qhiz[slot]) * cellSize.z);
+__device__
+bool intersectNexusBvh8ChildAabb(const Ray& ray, const Vec3& inverseDirection, const NXB::BVH8::NodeExplicit& node, const Vec3& cellSize, uint32_t slot, float closestT, float& nearT) {
+    float minimumX = node.p.x + static_cast<float>(node.qlox[slot]) * cellSize.x;
+    float minimumY = node.p.y + static_cast<float>(node.qloy[slot]) * cellSize.y;
+    float minimumZ = node.p.z + static_cast<float>(node.qloz[slot]) * cellSize.z;
+    float maximumX = node.p.x + static_cast<float>(node.qhix[slot]) * cellSize.x;
+    float maximumY = node.p.y + static_cast<float>(node.qhiy[slot]) * cellSize.y;
+    float maximumZ = node.p.z + static_cast<float>(node.qhiz[slot]) * cellSize.z;
 
-    return intersectAabb(ray, bounds, closestT, nearT);
+    return intersectAabb(ray, inverseDirection,
+        minimumX, minimumY, minimumZ,
+        maximumX, maximumY, maximumZ,
+        closestT, nearT);
 }
 
 __global__
@@ -233,7 +236,8 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
         };
         StackEntry stack[maxBvhStackSize];
         uint32_t stackSize = 1;
-        stack[0] = StackEntry{scene.nexusBvh8.nodeCount - 1, 0};
+        stack[0] = StackEntry{0, 0};
+        Vec3 inverseDirection(1.0f / work.ray.direction.x, 1.0f / work.ray.direction.y, 1.0f / work.ray.direction.z);
 
         while (stackSize > 0) {
             StackEntry entry = stack[--stackSize];
@@ -260,6 +264,10 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
             }
 
             const NXB::BVH8::NodeExplicit& node = reinterpret_cast<const NXB::BVH8::NodeExplicit&>(scene.nexusBvh8.nodes[entry.index]);
+            Vec3 cellSize(
+                ldexpf(1.0f, static_cast<int>(node.e[0]) - 127),
+                ldexpf(1.0f, static_cast<int>(node.e[1]) - 127),
+                ldexpf(1.0f, static_cast<int>(node.e[2]) - 127));
             StackEntry children[8];
             float childNearT[8];
             uint32_t childCount = 0;
@@ -270,7 +278,7 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
                     continue;
 
                 float nearT;
-                if (!intersectNexusBvh8ChildAabb(work.ray, node, slot, closestT, nearT))
+                if (!intersectNexusBvh8ChildAabb(work.ray, inverseDirection, node, cellSize, slot, closestT, nearT))
                     continue;
 
                 StackEntry child;

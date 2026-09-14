@@ -135,7 +135,7 @@ DeviceScene createObjScene(const char* filename) {
 
     constexpr bool useSpatialSplitBvh = false;
     constexpr bool useNexusBvh = true;
-    constexpr bool useNexusBvh8 = true;
+    constexpr bool useNexusBvh8 = false;
     DeviceScene deviceScene{};
     auto bvhBuildStart = std::chrono::steady_clock::now();
     HostBvh bvh;
