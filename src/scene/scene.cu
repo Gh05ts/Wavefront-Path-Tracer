@@ -127,21 +127,46 @@ DeviceScene createObjScene(const char* filename) {
     constexpr float objectScale = 8.0f;
     const Vec3 objectTranslation(0.13f, -0.764f, 0.5f);
 
-    for (Triangle& triangle : mesh.triangles) {
-        triangle.v0 = objectScale * triangle.v0 + objectTranslation;
-        triangle.v1 = objectScale * triangle.v1 + objectTranslation;
-        triangle.v2 = objectScale * triangle.v2 + objectTranslation;
-    }
-
+    constexpr bool useTlasBlas = true;
     constexpr bool useSpatialSplitBvh = false;
     constexpr bool useNexusBvh = true;
     constexpr bool useNexusBvh8 = false;
+
+    if (!useTlasBlas) {
+        for (Triangle& triangle : mesh.triangles) {
+            triangle.v0 = objectScale * triangle.v0 + objectTranslation;
+            triangle.v1 = objectScale * triangle.v1 + objectTranslation;
+            triangle.v2 = objectScale * triangle.v2 + objectTranslation;
+        }
+    }
+
     DeviceScene deviceScene{};
     auto bvhBuildStart = std::chrono::steady_clock::now();
     HostBvh bvh;
     NXB::BVHBuildMetrics nexusMetrics{};
+    NXB::BVHBuildMetrics tlasMetrics{};
 
-    if (useNexusBvh) {
+    if (useTlasBlas) {
+        std::vector<NXB::Triangle> nexusTriangles;
+        nexusTriangles.reserve(mesh.triangles.size());
+
+        for (const Triangle& triangle : mesh.triangles) {
+            nexusTriangles.emplace_back(
+                make_float3(triangle.v0.x, triangle.v0.y, triangle.v0.z),
+                make_float3(triangle.v1.x, triangle.v1.y, triangle.v1.z),
+                make_float3(triangle.v2.x, triangle.v2.y, triangle.v2.z));
+        }
+
+        NXB::DeviceBuffer<NXB::Triangle> deviceNexusTriangles(nexusTriangles);
+        deviceScene.blasBvhs.push_back(NXB::BuildBVH2(deviceNexusTriangles.Get(), static_cast<uint32_t>(nexusTriangles.size()), NXB::BuildConfig{}, &nexusMetrics));
+
+        const NXB::AABB& localBounds = deviceScene.blasBvhs[0].Bounds();
+        NXB::AABB instanceBounds(
+            make_float3(objectScale * localBounds.bMin.x + objectTranslation.x, objectScale * localBounds.bMin.y + objectTranslation.y, objectScale * localBounds.bMin.z + objectTranslation.z),
+            make_float3(objectScale * localBounds.bMax.x + objectTranslation.x, objectScale * localBounds.bMax.y + objectTranslation.y, objectScale * localBounds.bMax.z + objectTranslation.z));
+        NXB::DeviceBuffer<NXB::AABB> deviceInstanceBounds(std::vector<NXB::AABB>{instanceBounds});
+        deviceScene.tlas = NXB::BuildBVH2(deviceInstanceBounds.Get(), 1, NXB::BuildConfig{}, &tlasMetrics);
+    } else if (useNexusBvh) {
         std::vector<NXB::Triangle> nexusTriangles;
         nexusTriangles.reserve(mesh.triangles.size());
 
@@ -190,6 +215,22 @@ DeviceScene createObjScene(const char* filename) {
     checkCuda(cudaMalloc(&deviceScene.triangles, sizeof(Triangle) * mesh.triangles.size()));
     checkCuda(cudaMemcpy(deviceScene.triangles, mesh.triangles.data(), sizeof(Triangle) * mesh.triangles.size(), cudaMemcpyHostToDevice));
 
+    if (useTlasBlas) {
+        Blas hostBlas{};
+        hostBlas.triangles = deviceScene.triangles;
+        hostBlas.bvh = deviceScene.blasBvhs[0].View();
+
+        MeshInstance hostInstance{};
+        hostInstance.blasIndex = 0;
+        hostInstance.translation = objectTranslation;
+        hostInstance.scale = objectScale;
+
+        checkCuda(cudaMalloc(&deviceScene.blases, sizeof(hostBlas)));
+        checkCuda(cudaMemcpy(deviceScene.blases, &hostBlas, sizeof(hostBlas), cudaMemcpyHostToDevice));
+        checkCuda(cudaMalloc(&deviceScene.instances, sizeof(hostInstance)));
+        checkCuda(cudaMemcpy(deviceScene.instances, &hostInstance, sizeof(hostInstance), cudaMemcpyHostToDevice));
+    }
+
     if (!useNexusBvh) {
         checkCuda(cudaMalloc(&deviceScene.bvhNodes, sizeof(BvhNode) * bvh.nodes.size()));
         checkCuda(cudaMemcpy(deviceScene.bvhNodes, bvh.nodes.data(), sizeof(BvhNode) * bvh.nodes.size(), cudaMemcpyHostToDevice));
@@ -210,10 +251,19 @@ DeviceScene createObjScene(const char* filename) {
     deviceScene.scene.bvhNodeCount = static_cast<uint32_t>(bvh.nodes.size());
     deviceScene.scene.nexusBvh = deviceScene.nexusBvh.View();
     deviceScene.scene.nexusBvh8 = deviceScene.nexusBvh8.View();
+    deviceScene.scene.tlas = deviceScene.tlas.View();
+    deviceScene.scene.blases = deviceScene.blases;
+    deviceScene.scene.blasCount = static_cast<uint32_t>(deviceScene.blasBvhs.size());
+    deviceScene.scene.instances = deviceScene.instances;
+    deviceScene.scene.instanceCount = useTlasBlas ? 1 : 0;
     deviceScene.scene.materials = deviceScene.materials;
     deviceScene.scene.materialCount = static_cast<uint32_t>(hostMaterials.size());
 
-    if (useNexusBvh) {
+    if (useTlasBlas) {
+        std::cout << "Built NexusBVH TLAS/BLAS BVH2 with " << deviceScene.blasBvhs[0].NodeCount() << " BLAS nodes and " << deviceScene.tlas.NodeCount() << " TLAS nodes for " << mesh.triangles.size() << " triangles and 1 instance in " << bvhBuildMilliseconds << " ms\n";
+        std::cout << "  BLAS bounds " << nexusMetrics.computeSceneBoundsTime << " ms, morton " << nexusMetrics.computeMortonCodesTime << " ms, sort " << nexusMetrics.radixSortTime << " ms, build " << nexusMetrics.bvhBuildTime << " ms\n";
+        std::cout << "  TLAS bounds " << tlasMetrics.computeSceneBoundsTime << " ms, morton " << tlasMetrics.computeMortonCodesTime << " ms, sort " << tlasMetrics.radixSortTime << " ms, build " << tlasMetrics.bvhBuildTime << " ms\n";
+    } else if (useNexusBvh) {
         if (useNexusBvh8)
             std::cout << "Built NexusBVH H-PLOC BVH8 with " << deviceScene.nexusBvh8.NodeCount() << " nodes (average " << deviceScene.nexusBvh8.AverageChildPerNode() << " children) for " << mesh.triangles.size() << " triangles in " << bvhBuildMilliseconds << " ms\n";
         else
@@ -233,6 +283,10 @@ void destroyDeviceScene(DeviceScene& deviceScene) {
     checkCuda(cudaFree(deviceScene.bvhTriangleIndices));
     deviceScene.nexusBvh = NXB::BVH2{};
     deviceScene.nexusBvh8 = NXB::BVH8{};
+    deviceScene.tlas = NXB::BVH2{};
+    deviceScene.blasBvhs.clear();
+    checkCuda(cudaFree(deviceScene.blases));
+    checkCuda(cudaFree(deviceScene.instances));
     checkCuda(cudaFree(deviceScene.materials));
 
     deviceScene = DeviceScene{};

@@ -1,12 +1,24 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 #include "geometry.cuh"
 #include "bvh.cuh"
 #include "material.cuh"
 
 #include <NXB/BVH.h>
+
+struct Blas {
+    Triangle* triangles;
+    NXB::BVH2::DeviceView bvh;
+};
+
+struct MeshInstance {
+    uint32_t blasIndex;
+    Vec3 translation;
+    float scale;
+};
 
 struct Scene {
     Sphere* spheres;
@@ -22,6 +34,12 @@ struct Scene {
     NXB::BVH2::DeviceView nexusBvh;
     NXB::BVH8::DeviceView nexusBvh8;
 
+    NXB::BVH2::DeviceView tlas;
+    Blas* blases;
+    uint32_t blasCount;
+    MeshInstance* instances;
+    uint32_t instanceCount;
+
     Material* materials;
     uint32_t materialCount;
 };
@@ -35,6 +53,10 @@ struct DeviceScene {
     uint32_t* bvhTriangleIndices;
     NXB::BVH2 nexusBvh;
     NXB::BVH8 nexusBvh8;
+    NXB::BVH2 tlas;
+    std::vector<NXB::BVH2> blasBvhs;
+    Blas* blases;
+    MeshInstance* instances;
     Material* materials;
 };
 

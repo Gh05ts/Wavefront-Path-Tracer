@@ -199,6 +199,55 @@ bool intersectNexusBvh8ChildAabb(const Ray& ray, const Vec3& inverseDirection, c
         closestT, nearT);
 }
 
+__device__
+void intersectNexusBvh2(const Ray& ray, const Triangle* triangles, const NXB::BVH2::DeviceView& bvh, float& closestT, int& closestMaterial, Vec3& closestNormal) {
+    constexpr uint32_t maxBvhStackSize = 64;
+    uint32_t stack[maxBvhStackSize];
+    uint32_t stackSize = 1;
+    stack[0] = bvh.nodeCount - 1;
+
+    while (stackSize > 0) {
+        const NXB::BVH2::Node& node = bvh.nodes[stack[--stackSize]];
+        float nearT;
+
+        if (!intersectNexusAabb(ray, node.bounds, closestT, nearT))
+            continue;
+
+        if (node.leftChild == NXB::InvalidIdx) {
+            const Triangle& triangle = triangles[node.rightChild];
+            float t;
+
+            if (intersectTriangle(ray, triangle, t) && t < closestT) {
+                closestT = t;
+                closestMaterial = static_cast<int>(triangle.material);
+
+                Vec3 edge1 = triangle.v1 - triangle.v0;
+                Vec3 edge2 = triangle.v2 - triangle.v0;
+                closestNormal = normalize(cross(edge1, edge2));
+
+                if (dot(closestNormal, ray.direction) > 0.0f)
+                    closestNormal = -closestNormal;
+            }
+        } else {
+            float leftNearT;
+            float rightNearT;
+            bool hitLeft = intersectNexusAabb(ray, bvh.nodes[node.leftChild].bounds, closestT, leftNearT);
+            bool hitRight = intersectNexusAabb(ray, bvh.nodes[node.rightChild].bounds, closestT, rightNearT);
+
+            if (hitLeft && hitRight) {
+                uint32_t nearChild = leftNearT < rightNearT ? node.leftChild : node.rightChild;
+                uint32_t farChild = leftNearT < rightNearT ? node.rightChild : node.leftChild;
+                stack[stackSize++] = farChild;
+                stack[stackSize++] = nearChild;
+            } else if (hitLeft) {
+                stack[stackSize++] = node.leftChild;
+            } else if (hitRight) {
+                stack[stackSize++] = node.rightChild;
+            }
+        }
+    }
+}
+
 __global__
 void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -228,7 +277,45 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
         }
     }
 
-    if (scene.nexusBvh8.nodes != nullptr) {
+    if (scene.tlas.nodes != nullptr) {
+        constexpr uint32_t maxTlasStackSize = 64;
+        uint32_t stack[maxTlasStackSize];
+        uint32_t stackSize = 1;
+        stack[0] = scene.tlas.nodeCount - 1;
+
+        while (stackSize > 0) {
+            const NXB::BVH2::Node& node = scene.tlas.nodes[stack[--stackSize]];
+            float nearT;
+
+            if (!intersectNexusAabb(work.ray, node.bounds, closestT, nearT))
+                continue;
+
+            if (node.leftChild == NXB::InvalidIdx) {
+                const MeshInstance& instance = scene.instances[node.rightChild];
+                const Blas& blas = scene.blases[instance.blasIndex];
+                Ray localRay;
+                localRay.origin = (work.ray.origin - instance.translation) / instance.scale;
+                localRay.direction = work.ray.direction / instance.scale;
+                intersectNexusBvh2(localRay, blas.triangles, blas.bvh, closestT, closestMaterial, closestNormal);
+            } else {
+                float leftNearT;
+                float rightNearT;
+                bool hitLeft = intersectNexusAabb(work.ray, scene.tlas.nodes[node.leftChild].bounds, closestT, leftNearT);
+                bool hitRight = intersectNexusAabb(work.ray, scene.tlas.nodes[node.rightChild].bounds, closestT, rightNearT);
+
+                if (hitLeft && hitRight) {
+                    uint32_t nearChild = leftNearT < rightNearT ? node.leftChild : node.rightChild;
+                    uint32_t farChild = leftNearT < rightNearT ? node.rightChild : node.leftChild;
+                    stack[stackSize++] = farChild;
+                    stack[stackSize++] = nearChild;
+                } else if (hitLeft) {
+                    stack[stackSize++] = node.leftChild;
+                } else if (hitRight) {
+                    stack[stackSize++] = node.rightChild;
+                }
+            }
+        }
+    } else if (scene.nexusBvh8.nodes != nullptr) {
         constexpr uint32_t maxBvhStackSize = 96;
         struct StackEntry {
             uint32_t index;
