@@ -395,7 +395,7 @@ DeviceScene createCornellScene(const char* filename, float objectScale, const Ve
     const Vec3 lightEdgeU(1.5f, 0.0f, 0.0f);
     const Vec3 lightEdgeV(0.0f, 0.0f, 1.5f);
     addQuad(hostStaticTriangles,
-        lightCorner, lightCorner + lightEdgeV, lightCorner + lightEdgeU + lightEdgeV, lightCorner + lightEdgeU, 4);
+        lightCorner, lightCorner + lightEdgeU, lightCorner + lightEdgeU + lightEdgeV, lightCorner + lightEdgeV, 4);
 
     std::vector<Material> hostMaterials;
     hostMaterials.reserve(objectMaterialOffset + objScene.materials.size());

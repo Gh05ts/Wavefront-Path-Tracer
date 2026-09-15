@@ -410,7 +410,7 @@ void sampleDirectLight(PathState& path, const Hit& hit, const Material& material
 
     const Material& lightMaterial = scene.materials[light.material];
     constexpr float inversePi = 0.31830988618f;
-    float geometryTerm = surfaceCosine * lightCosine * light.area / distanceSquared;
+    float geometryTerm = surfaceCosine * lightCosine * light.area / (distanceSquared * light.selectionPdf);
     float lightPdf = light.selectionPdf * distanceSquared / (lightCosine * light.area);
     float bsdfPdf = surfaceCosine * inversePi;
     float misWeight = powerHeuristic(lightPdf, bsdfPdf);
