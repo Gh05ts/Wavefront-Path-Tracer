@@ -23,7 +23,7 @@ void generatePrimaryRays(RayQueue queue, PathState* pathStates, Camera camera, u
 
     Ray ray = camera.generateRay(u, v);
 
-    pathStates[localPixel] = PathState{ray, Vec3(1.0f, 1.0f, 1.0f), Vec3(0.0f, 0.0f, 0.0f), pixel, 0, rngState, true};
+    pathStates[localPixel] = PathState{ray, Vec3(1.0f, 1.0f, 1.0f), Vec3(0.0f, 0.0f, 0.0f), pixel, 0, rngState, true, true};
 
     uint32_t outputIndex = atomicAdd(queue.count, 1);
 
@@ -249,6 +249,70 @@ void intersectNexusBvh2(const Ray& ray, const Triangle* triangles, const NXB::BV
             }
         }
     }
+}
+
+__device__
+bool isOccluded(const Ray& ray, float maximumDistance, Scene scene) {
+    for (uint32_t i = 0; i < scene.sphereCount; ++i) {
+        float t;
+
+        if (intersectSphere(ray, scene.spheres[i], t) && t < maximumDistance)
+            return true;
+    }
+
+    for (uint32_t i = 0; i < scene.staticTriangleCount; ++i) {
+        float t;
+
+        if (intersectTriangle(ray, scene.staticTriangles[i], t) && t < maximumDistance)
+            return true;
+    }
+
+    for (uint32_t i = 0; i < scene.instanceCount; ++i) {
+        const MeshInstance& instance = scene.instances[i];
+        const Blas& blas = scene.blases[instance.blasIndex];
+        Ray localRay;
+        localRay.origin = (ray.origin - instance.translation) / instance.scale;
+        localRay.direction = ray.direction / instance.scale;
+
+        float closestT = maximumDistance;
+        int closestMaterial = -1;
+        Vec3 closestNormal;
+        intersectNexusBvh2(localRay, blas.triangles, blas.bvh, closestT, closestMaterial, closestNormal);
+
+        if (closestMaterial >= 0)
+            return true;
+    }
+
+    return false;
+}
+
+__device__
+void sampleDirectLight(PathState& path, const Hit& hit, const Material& material, Scene scene) {
+    if (!scene.hasAreaLight)
+        return;
+
+    const AreaLight& light = scene.areaLight;
+    Vec3 lightPosition = light.corner + randomFloat(path.rngState) * light.edgeU + randomFloat(path.rngState) * light.edgeV;
+    Vec3 toLight = lightPosition - hit.position;
+    float distanceSquared = lengthSquared(toLight);
+    float distance = sqrtf(distanceSquared);
+    Vec3 direction = toLight / distance;
+    float surfaceCosine = fmaxf(0.0f, dot(hit.normal, direction));
+    float lightCosine = fmaxf(0.0f, dot(light.normal, -direction));
+
+    if (surfaceCosine == 0.0f || lightCosine == 0.0f)
+        return;
+
+    Ray shadowRay(hit.position + direction * 0.001f, direction);
+
+    if (isOccluded(shadowRay, distance - 0.002f, scene))
+        return;
+
+    const Material& lightMaterial = scene.materials[light.material];
+    constexpr float inversePi = 0.31830988618f;
+    float geometryTerm = surfaceCosine * lightCosine * light.area / distanceSquared;
+    Vec3 directLighting = hadamard(material.albedo, lightMaterial.emission) * (inversePi * geometryTerm);
+    path.radiance += hadamard(path.throughput, directLighting);
 }
 
 __global__
@@ -566,7 +630,8 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
             const Material& material = scene.materials[hit.material];
 
             if (material.type == MaterialType::Emissive) {
-                path.radiance += hadamard(path.throughput, material.emission);
+                if (!scene.hasAreaLight || path.depth == 0 || path.specularBounce)
+                    path.radiance += hadamard(path.throughput, material.emission);
                 path.active = false;
                 framebuffer[path.pixelIndex] += path.radiance;
             } else {
@@ -574,8 +639,10 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
 
                 switch (material.type) {
                 case MaterialType::Diffuse:
+                    sampleDirectLight(path, hit, material, scene);
                     path.throughput = hadamard(path.throughput, material.albedo);
                     direction = sampleCosineHemisphere(hit.normal, path.rngState);
+                    path.specularBounce = false;
                     break;
 
                 case MaterialType::Metal: {
@@ -585,6 +652,8 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
 
                     if (dot(direction, hit.normal) <= 0.0f)
                         path.active = false;
+
+                    path.specularBounce = true;
 
                     break;
                 }
@@ -602,6 +671,8 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
                         direction = reflect(incident, normal);
                     else
                         direction = refract(incident, normal, refractionRatio);
+
+                    path.specularBounce = true;
 
                     break;
                 }
