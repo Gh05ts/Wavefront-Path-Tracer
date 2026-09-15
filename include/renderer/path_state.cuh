@@ -13,6 +13,7 @@ struct PathState {
 
     uint32_t rngState;
 
+    float previousBsdfPdf;
     bool specularBounce;
     bool active;
 };

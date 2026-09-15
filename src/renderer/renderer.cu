@@ -23,7 +23,7 @@ void generatePrimaryRays(RayQueue queue, PathState* pathStates, Camera camera, u
 
     Ray ray = camera.generateRay(u, v);
 
-    pathStates[localPixel] = PathState{ray, Vec3(1.0f, 1.0f, 1.0f), Vec3(0.0f, 0.0f, 0.0f), pixel, 0, rngState, true, true};
+    pathStates[localPixel] = PathState{ray, Vec3(1.0f, 1.0f, 1.0f), Vec3(0.0f, 0.0f, 0.0f), pixel, 0, rngState, 0.0f, true, true};
 
     uint32_t outputIndex = atomicAdd(queue.count, 1);
 
@@ -287,6 +287,13 @@ bool isOccluded(const Ray& ray, float maximumDistance, Scene scene) {
 }
 
 __device__
+float powerHeuristic(float firstPdf, float secondPdf) {
+    float firstSquared = firstPdf * firstPdf;
+    float secondSquared = secondPdf * secondPdf;
+    return firstSquared / (firstSquared + secondSquared);
+}
+
+__device__
 void sampleDirectLight(PathState& path, const Hit& hit, const Material& material, Scene scene) {
     if (!scene.hasAreaLight)
         return;
@@ -311,7 +318,10 @@ void sampleDirectLight(PathState& path, const Hit& hit, const Material& material
     const Material& lightMaterial = scene.materials[light.material];
     constexpr float inversePi = 0.31830988618f;
     float geometryTerm = surfaceCosine * lightCosine * light.area / distanceSquared;
-    Vec3 directLighting = hadamard(material.albedo, lightMaterial.emission) * (inversePi * geometryTerm);
+    float lightPdf = distanceSquared / (lightCosine * light.area);
+    float bsdfPdf = surfaceCosine * inversePi;
+    float misWeight = powerHeuristic(lightPdf, bsdfPdf);
+    Vec3 directLighting = hadamard(material.albedo, lightMaterial.emission) * (inversePi * geometryTerm * misWeight);
     path.radiance += hadamard(path.throughput, directLighting);
 }
 
@@ -630,8 +640,20 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
             const Material& material = scene.materials[hit.material];
 
             if (material.type == MaterialType::Emissive) {
-                if (!scene.hasAreaLight || path.depth == 0 || path.specularBounce)
-                    path.radiance += hadamard(path.throughput, material.emission);
+                float misWeight = 1.0f;
+
+                if (scene.hasAreaLight && hit.material == scene.areaLight.material) {
+                    float lightCosine = fmaxf(0.0f, dot(scene.areaLight.normal, -path.ray.direction));
+
+                    if (lightCosine == 0.0f)
+                        misWeight = 0.0f;
+                    else if (path.depth > 0 && !path.specularBounce) {
+                        float lightPdf = hit.t * hit.t / (lightCosine * scene.areaLight.area);
+                        misWeight = powerHeuristic(path.previousBsdfPdf, lightPdf);
+                    }
+                }
+
+                path.radiance += hadamard(path.throughput, material.emission) * misWeight;
                 path.active = false;
                 framebuffer[path.pixelIndex] += path.radiance;
             } else {
@@ -642,6 +664,7 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
                     sampleDirectLight(path, hit, material, scene);
                     path.throughput = hadamard(path.throughput, material.albedo);
                     direction = sampleCosineHemisphere(hit.normal, path.rngState);
+                    path.previousBsdfPdf = fmaxf(0.0f, dot(hit.normal, direction)) * 0.31830988618f;
                     path.specularBounce = false;
                     break;
 
@@ -654,6 +677,7 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
                         path.active = false;
 
                     path.specularBounce = true;
+                    path.previousBsdfPdf = 0.0f;
 
                     break;
                 }
@@ -673,6 +697,7 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
                         direction = refract(incident, normal, refractionRatio);
 
                     path.specularBounce = true;
+                    path.previousBsdfPdf = 0.0f;
 
                     break;
                 }
