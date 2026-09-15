@@ -31,6 +31,7 @@ target_include_directories(pathtracer
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/extern/tinyobjloader
+        ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
 )
 
 target_link_libraries(pathtracer

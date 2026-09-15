@@ -64,8 +64,11 @@ int main() {
     constexpr bool useCornellScene = true;
     Camera camera = useCornellScene ? createCornellCamera(width, height) : createDemoCamera(width, height);
     constexpr bool useObjScene = true;
-    DeviceScene deviceScene = useCornellScene ? createCornellScene("../assets/stanford-bunny.obj") :
-        (useObjScene ? createObjScene("../assets/stanford-bunny.obj") : createDemoScene());
+    constexpr char sceneObjectFilename[] = "../assets/deer-obj.obj";
+    constexpr float sceneObjectScale = 0.1f;
+    const Vec3 sceneObjectTranslation(0.181f, -0.906f, -0.2f);
+    DeviceScene deviceScene = useCornellScene ? createCornellScene(sceneObjectFilename, sceneObjectScale, sceneObjectTranslation) :
+        (useObjScene ? createObjScene(sceneObjectFilename) : createDemoScene());
 
     // --------------------------------------------------------
     // Path states

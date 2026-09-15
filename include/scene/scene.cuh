@@ -14,10 +14,55 @@ struct Blas {
     NXB::BVH2::DeviceView bvh;
 };
 
+struct InstanceTransform {
+    Vec3 localToWorldX;
+    Vec3 localToWorldY;
+    Vec3 localToWorldZ;
+    Vec3 worldToLocalX;
+    Vec3 worldToLocalY;
+    Vec3 worldToLocalZ;
+    Vec3 translation;
+};
+
+__host__ __device__
+inline Vec3 transformVector(const InstanceTransform& transform, const Vec3& vector) {
+    return transform.localToWorldX * vector.x + transform.localToWorldY * vector.y + transform.localToWorldZ * vector.z;
+}
+
+__host__ __device__
+inline Vec3 inverseTransformVector(const InstanceTransform& transform, const Vec3& vector) {
+    return transform.worldToLocalX * vector.x + transform.worldToLocalY * vector.y + transform.worldToLocalZ * vector.z;
+}
+
+__host__ __device__
+inline Vec3 transformNormal(const InstanceTransform& transform, const Vec3& normal) {
+    return normalize(Vec3(
+        dot(transform.worldToLocalX, normal),
+        dot(transform.worldToLocalY, normal),
+        dot(transform.worldToLocalZ, normal)));
+}
+
+inline InstanceTransform makeScaledTransform(const Vec3& translation, float scale) {
+    float inverseScale = 1.0f / scale;
+    return InstanceTransform{
+        Vec3(scale, 0.0f, 0.0f), Vec3(0.0f, scale, 0.0f), Vec3(0.0f, 0.0f, scale),
+        Vec3(inverseScale, 0.0f, 0.0f), Vec3(0.0f, inverseScale, 0.0f), Vec3(0.0f, 0.0f, inverseScale),
+        translation};
+}
+
 struct MeshInstance {
     uint32_t blasIndex;
-    Vec3 translation;
-    float scale;
+    uint32_t lightOffset;
+    InstanceTransform transform;
+};
+
+struct MeshAsset {
+    std::vector<Triangle> triangles;
+};
+
+struct SceneInstance {
+    uint32_t meshIndex;
+    InstanceTransform transform;
 };
 
 struct Scene {
@@ -45,9 +90,12 @@ struct Scene {
 
     Material* materials;
     uint32_t materialCount;
+    Texture* textures;
+    uint32_t textureCount;
 
-    AreaLight areaLight;
-    bool hasAreaLight;
+    TriangleLight* lights;
+    LightAliasEntry* lightAlias;
+    uint32_t lightCount;
     bool blackBackground;
 };
 
@@ -63,13 +111,24 @@ struct DeviceScene {
     NXB::BVH8 nexusBvh8;
     NXB::BVH2 tlas;
     std::vector<NXB::BVH2> blasBvhs;
+    std::vector<Triangle*> meshTriangles;
     Blas* blases;
     MeshInstance* instances;
     Material* materials;
+    Texture* textures;
+    TriangleLight* lights;
+    LightAliasEntry* lightAlias;
+    std::vector<TriangleLight> hostLights;
+    std::vector<float> lightWeights;
+    std::vector<cudaArray_t> textureArrays;
+    std::vector<cudaTextureObject_t> textureObjects;
 };
 
 DeviceScene createDemoScene();
 DeviceScene createObjScene(const char* filename);
-DeviceScene createCornellScene(const char* filename);
+DeviceScene createCornellScene(const char* filename, float objectScale, const Vec3& objectTranslation);
+void buildTlasBlas(DeviceScene& deviceScene, std::vector<MeshAsset>& meshes, const std::vector<SceneInstance>& instances, const std::vector<Material>& materials);
+void addStaticTriangleLights(DeviceScene& deviceScene, std::vector<Triangle>& triangles, const std::vector<Material>& materials);
+void uploadTriangleLights(DeviceScene& deviceScene);
 
 void destroyDeviceScene(DeviceScene& deviceScene);
