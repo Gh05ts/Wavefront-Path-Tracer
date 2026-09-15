@@ -67,9 +67,12 @@ int main() {
     constexpr bool useObjScene = true;
     constexpr char sceneObjectFilename[] = "../assets/deer-obj.obj";
     constexpr char gltfFilename[] = "../assets/sponza/Sponza.gltf";
+    constexpr bool useHdrEnvironment = true;
+    constexpr char hdrEnvironmentFilename[] = "../assets/sponza/spruit_sunrise_4k.hdr";
+    constexpr float hdrEnvironmentIntensity = 1.0f;
     constexpr float sceneObjectScale = 0.1f;
     const Vec3 sceneObjectTranslation(0.181f, -0.906f, -0.2f);
-    DeviceScene deviceScene = useGltfScene ? createGltfScene(gltfFilename) :
+    DeviceScene deviceScene = useGltfScene ? createGltfScene(gltfFilename, useHdrEnvironment ? hdrEnvironmentFilename : nullptr, hdrEnvironmentIntensity) :
         (useCornellScene ? createCornellScene(sceneObjectFilename, sceneObjectScale, sceneObjectTranslation) :
         (useObjScene ? createObjScene(sceneObjectFilename) : createDemoScene()));
 
@@ -139,8 +142,8 @@ int main() {
     // Trace samples and path bounces
     // --------------------------------------------------------
 
-    constexpr uint32_t maxDepth = 8;
-    constexpr uint32_t russianRouletteStartDepth = 3;
+    constexpr uint32_t maxDepth = 16;
+    constexpr uint32_t russianRouletteStartDepth = 16;
     constexpr uint32_t samplesPerPixel = 512;
     constexpr bool resumeFromCheckpoint = false;
     constexpr char checkpointFilename[] = "render.checkpoint";

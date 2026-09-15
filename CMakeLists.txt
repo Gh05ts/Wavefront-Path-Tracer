@@ -22,6 +22,7 @@ add_executable(pathtracer
     src/scene/bvh_sbvh.cpp
     src/scene/obj_loader.cpp
     src/scene/gltf_loader.cpp
+    src/scene/environment_loader.cpp
     src/renderer/renderer.cu
     src/renderer/render_session.cu
     src/renderer/render_checkpoint.cpp

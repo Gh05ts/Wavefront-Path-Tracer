@@ -405,6 +405,41 @@ float powerHeuristic(float firstPdf, float secondPdf) {
 }
 
 __device__
+Vec2 getEnvironmentUv(const Vec3& direction) {
+    constexpr float inverseTwoPi = 0.15915494309f;
+    constexpr float inversePi = 0.31830988618f;
+    Vec3 normalizedDirection = normalize(direction);
+    return Vec2{
+        atan2f(normalizedDirection.z, normalizedDirection.x) * inverseTwoPi + 0.5f,
+        acosf(fminf(1.0f, fmaxf(-1.0f, normalizedDirection.y))) * inversePi};
+}
+
+__device__
+Vec3 sampleEnvironment(const EnvironmentLight& environment, const Vec3& direction) {
+    if (!environment.enabled)
+        return Vec3(0.0f, 0.0f, 0.0f);
+
+    Vec2 uv = getEnvironmentUv(direction);
+    float4 texel = tex2D<float4>(environment.texture, uv.x, uv.y);
+    return environment.intensity * Vec3(texel.x, texel.y, texel.z);
+}
+
+__device__
+float environmentPdf(const EnvironmentLight& environment, const Vec3& direction) {
+    if (!environment.enabled)
+        return 0.0f;
+
+    Vec2 uv = getEnvironmentUv(direction);
+    uint32_t x = min(static_cast<uint32_t>(uv.x * environment.width), environment.width - 1);
+    uint32_t y = min(static_cast<uint32_t>(uv.y * environment.height), environment.height - 1);
+    uint32_t index = y * environment.width + x;
+    float previous = index == 0 ? 0.0f : environment.cdf[index - 1];
+    float selectionPdf = environment.cdf[index] - previous;
+    float sine = sinf(3.14159265359f * (static_cast<float>(y) + 0.5f) / static_cast<float>(environment.height));
+    return selectionPdf * static_cast<float>(environment.width * environment.height) / (19.7392088022f * fmaxf(sine, 1e-4f));
+}
+
+__device__
 Vec2 getTextureUv(const TextureBinding& binding, const Hit& hit) {
     Vec2 uv = binding.texCoord == 1 ? hit.uv1 : hit.uv;
 
@@ -528,6 +563,51 @@ void sampleDirectLight(PathState& path, const Hit& hit, const Material& material
     float bsdfPdf = surfaceCosine * inversePi;
     float misWeight = powerHeuristic(lightPdf, bsdfPdf);
     Vec3 directLighting = hadamard(getMaterialAlbedo(material, hit, scene), lightMaterial.emission) * (inversePi * geometryTerm * misWeight);
+    path.radiance += hadamard(path.throughput, directLighting);
+}
+
+__device__
+void sampleDirectEnvironment(PathState& path, const Hit& hit, const Material& material, Scene scene) {
+    const EnvironmentLight& environment = scene.environment;
+    if (!environment.enabled)
+        return;
+
+    uint32_t count = environment.width * environment.height;
+    float sample = randomFloat(path.rngState);
+    uint32_t low = 0;
+    uint32_t high = count - 1;
+    while (low < high) {
+        uint32_t middle = low + (high - low) / 2;
+        if (environment.cdf[middle] < sample)
+            low = middle + 1;
+        else
+            high = middle;
+    }
+
+    uint32_t x = low % environment.width;
+    uint32_t y = low / environment.width;
+    float u = (static_cast<float>(x) + randomFloat(path.rngState)) / static_cast<float>(environment.width);
+    float v = (static_cast<float>(y) + randomFloat(path.rngState)) / static_cast<float>(environment.height);
+    float phi = 6.28318530718f * (u - 0.5f);
+    float theta = 3.14159265359f * v;
+    float sine = sinf(theta);
+    Vec3 direction(cosf(phi) * sine, cosf(theta), sinf(phi) * sine);
+    float surfaceCosine = fmaxf(0.0f, dot(hit.normal, direction));
+    if (surfaceCosine == 0.0f)
+        return;
+
+    Ray shadowRay(hit.position + direction * 0.001f, direction);
+    if (isOccluded(shadowRay, 1e30f, scene))
+        return;
+
+    float lightPdf = environmentPdf(environment, direction);
+    if (lightPdf == 0.0f)
+        return;
+
+    constexpr float inversePi = 0.31830988618f;
+    float bsdfPdf = surfaceCosine * inversePi;
+    float misWeight = powerHeuristic(lightPdf, bsdfPdf);
+    Vec3 directLighting = hadamard(getMaterialAlbedo(material, hit, scene), sampleEnvironment(environment, direction)) * (surfaceCosine * inversePi * misWeight / lightPdf);
     path.radiance += hadamard(path.throughput, directLighting);
 }
 
@@ -812,7 +892,10 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
         PathState& path = pathStates[work.pathIndex];
 
         if (!results[index].didHit) {
-            if (!scene.blackBackground) {
+            if (scene.environment.enabled) {
+                float misWeight = path.depth > 0 && !path.specularBounce ? powerHeuristic(path.previousBsdfPdf, environmentPdf(scene.environment, path.ray.direction)) : 1.0f;
+                path.radiance += hadamard(path.throughput, sampleEnvironment(scene.environment, path.ray.direction)) * misWeight;
+            } else if (!scene.blackBackground) {
                 float t = 0.5f * (path.ray.direction.y + 1.0f);
                 Vec3 sky = (1.0f - t) * Vec3(1.0f, 1.0f, 1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
                 path.radiance += hadamard(path.throughput, sky);
@@ -864,6 +947,7 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
                 switch (materialType) {
                 case MaterialType::Diffuse:
                     sampleDirectLight(path, shadedHit, material, scene);
+                    sampleDirectEnvironment(path, shadedHit, material, scene);
                     path.throughput = hadamard(path.throughput, albedo);
                     direction = sampleCosineHemisphere(shadedHit.normal, path.rngState);
                     path.previousBsdfPdf = fmaxf(0.0f, dot(shadedHit.normal, direction)) * 0.31830988618f;

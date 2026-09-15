@@ -2,6 +2,7 @@
 #include "scene/bvh.cuh"
 #include "scene/gltf_loader.hpp"
 #include "scene/obj_loader.hpp"
+#include "scene/environment_loader.hpp"
 
 #include <NXB/BVHBuilder.h>
 
@@ -84,6 +85,55 @@ void uploadTextures(DeviceScene& deviceScene, const std::vector<ObjTexture>& hos
     checkCuda(cudaMemcpy(deviceScene.textures, hostTextureViews.data(), sizeof(Texture) * hostTextureViews.size(), cudaMemcpyHostToDevice));
     deviceScene.scene.textures = deviceScene.textures;
     deviceScene.scene.textureCount = static_cast<uint32_t>(hostTextureViews.size());
+}
+
+void uploadEnvironment(DeviceScene& deviceScene, const char* filename, float intensity) {
+    if (filename == nullptr || filename[0] == '\0')
+        return;
+
+    EnvironmentImage image = loadEnvironmentImage(filename);
+    cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float4>();
+    checkCuda(cudaMallocArray(&deviceScene.environmentArray, &channelDesc, image.width, image.height));
+    checkCuda(cudaMemcpy2DToArray(deviceScene.environmentArray, 0, 0, image.pixels.data(), image.width * sizeof(float4), image.width * sizeof(float4), image.height, cudaMemcpyHostToDevice));
+
+    cudaResourceDesc resourceDesc{};
+    resourceDesc.resType = cudaResourceTypeArray;
+    resourceDesc.res.array.array = deviceScene.environmentArray;
+
+    cudaTextureDesc textureDesc{};
+    textureDesc.addressMode[0] = cudaAddressModeWrap;
+    textureDesc.addressMode[1] = cudaAddressModeClamp;
+    textureDesc.filterMode = cudaFilterModeLinear;
+    textureDesc.readMode = cudaReadModeElementType;
+    textureDesc.normalizedCoords = 1;
+    checkCuda(cudaCreateTextureObject(&deviceScene.environmentTexture, &resourceDesc, &textureDesc, nullptr));
+
+    std::vector<float> cdf(image.width * image.height);
+    float totalWeight = 0.0f;
+    constexpr float pi = 3.14159265359f;
+    for (uint32_t y = 0; y < image.height; ++y) {
+        float theta = pi * (static_cast<float>(y) + 0.5f) / static_cast<float>(image.height);
+        float sine = sinf(theta);
+        for (uint32_t x = 0; x < image.width; ++x) {
+            const float* pixel = &image.pixels[4 * (y * image.width + x)];
+            float luminance = 0.2126f * pixel[0] + 0.7152f * pixel[1] + 0.0722f * pixel[2];
+            totalWeight += fmaxf(0.0f, luminance) * sine;
+            cdf[y * image.width + x] = totalWeight;
+        }
+    }
+
+    if (totalWeight <= 0.0f) {
+        std::cerr << "HDR environment has no positive radiance: " << filename << '\n';
+        std::exit(1);
+    }
+
+    for (float& value : cdf)
+        value /= totalWeight;
+
+    checkCuda(cudaMalloc(&deviceScene.environmentCdf, sizeof(float) * cdf.size()));
+    checkCuda(cudaMemcpy(deviceScene.environmentCdf, cdf.data(), sizeof(float) * cdf.size(), cudaMemcpyHostToDevice));
+    deviceScene.scene.environment = EnvironmentLight{deviceScene.environmentTexture, deviceScene.environmentCdf, image.width, image.height, intensity, true};
+    std::cout << "Loaded importance-sampled HDR environment " << filename << " (" << image.width << " x " << image.height << ")\n";
 }
 } // namespace
 
@@ -430,7 +480,7 @@ DeviceScene createCornellScene(const char* filename, float objectScale, const Ve
     return deviceScene;
 }
 
-DeviceScene createGltfScene(const char* filename) {
+DeviceScene createGltfScene(const char* filename, const char* environmentFilename, float environmentIntensity) {
     GltfScene gltfScene = loadGltfScene(filename);
 
     if (gltfScene.meshes.empty() || gltfScene.instances.empty()) {
@@ -451,6 +501,7 @@ DeviceScene createGltfScene(const char* filename) {
     deviceScene.scene.materials = deviceScene.materials;
     deviceScene.scene.materialCount = static_cast<uint32_t>(gltfScene.materials.size());
     deviceScene.scene.blackBackground = false;
+    uploadEnvironment(deviceScene, environmentFilename, environmentIntensity);
 
     float bvhBuildMilliseconds = std::chrono::duration<float, std::milli>(bvhBuildEnd - bvhBuildStart).count();
     std::cout << "Built glTF TLAS/BLAS BVH2 with " << deviceScene.blasBvhs.size() << " BLASes, " << deviceScene.tlas.NodeCount() << " TLAS nodes, " << deviceScene.scene.lightCount << " triangle lights, and " << deviceScene.scene.instanceCount << " instances in " << bvhBuildMilliseconds << " ms\n";
@@ -631,6 +682,11 @@ void destroyDeviceScene(DeviceScene& deviceScene) {
     checkCuda(cudaFree(deviceScene.materials));
     checkCuda(cudaFree(deviceScene.lights));
     checkCuda(cudaFree(deviceScene.lightAlias));
+    checkCuda(cudaFree(deviceScene.environmentCdf));
+    if (deviceScene.environmentTexture != 0)
+        checkCuda(cudaDestroyTextureObject(deviceScene.environmentTexture));
+    if (deviceScene.environmentArray != nullptr)
+        checkCuda(cudaFreeArray(deviceScene.environmentArray));
     for (cudaTextureObject_t textureObject : deviceScene.textureObjects)
         checkCuda(cudaDestroyTextureObject(textureObject));
     for (cudaArray_t textureArray : deviceScene.textureArrays)
