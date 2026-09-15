@@ -22,7 +22,7 @@ Material makeMaterial(const tinyobj::material_t& source) {
     material.emission = Vec3(source.emission[0], source.emission[1], source.emission[2]);
     material.roughness = 0.0f;
     material.ior = source.ior > 0.0f ? source.ior : 1.0f;
-    material.albedoTexture = invalidTextureIndex;
+    material.albedoTexture.texture = invalidTextureIndex;
     return material;
 }
 
@@ -33,7 +33,7 @@ Material makeDefaultMaterial() {
     material.emission = Vec3(0.0f, 0.0f, 0.0f);
     material.roughness = 0.0f;
     material.ior = 1.0f;
-    material.albedoTexture = invalidTextureIndex;
+    material.albedoTexture.texture = invalidTextureIndex;
     return material;
 }
 
@@ -77,7 +77,7 @@ ObjScene loadObjScene(const char* filename) {
 
         auto existing = textureIndices.find(textureName);
         if (existing != textureIndices.end()) {
-            scene.materials[materialIndex + 1].albedoTexture = existing->second;
+            scene.materials[materialIndex + 1].albedoTexture.texture = existing->second;
             continue;
         }
 
@@ -100,7 +100,7 @@ ObjScene loadObjScene(const char* filename) {
         uint32_t textureIndex = static_cast<uint32_t>(scene.textures.size());
         scene.textures.push_back(std::move(texture));
         textureIndices.emplace(textureName, textureIndex);
-        scene.materials[materialIndex + 1].albedoTexture = textureIndex;
+        scene.materials[materialIndex + 1].albedoTexture.texture = textureIndex;
     }
 
     std::vector<Vec3> generatedNormals(attributes.vertices.size() / 3);

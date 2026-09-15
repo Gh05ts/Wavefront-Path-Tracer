@@ -10,6 +10,15 @@ struct Texture {
     cudaTextureObject_t object;
 };
 
+struct TextureBinding {
+    uint32_t texture = invalidTextureIndex;
+    uint32_t texCoord = 0;
+    Vec2 offset{0.0f, 0.0f};
+    Vec2 scale{1.0f, 1.0f};
+    float rotation = 0.0f;
+    bool hasTransform = false;
+};
+
 enum class MaterialType: uint32_t {
     Diffuse,
     Metal,
@@ -25,5 +34,16 @@ struct Material {
 
     float roughness;
     float ior;
-    uint32_t albedoTexture = invalidTextureIndex;
+    float metallic = 0.0f;
+    float normalScale = 1.0f;
+    float alphaCutoff = 0.5f;
+    bool alphaMasked = false;
+    Vec3 attenuationColor = Vec3(1.0f, 1.0f, 1.0f);
+    float attenuationDistance = 0.0f;
+    float volumeDensity = 1.0f;
+    TextureBinding albedoTexture;
+    TextureBinding metallicRoughnessTexture;
+    TextureBinding emissiveTexture;
+    TextureBinding normalTexture;
+    TextureBinding thicknessTexture;
 };

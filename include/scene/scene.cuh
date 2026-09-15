@@ -127,6 +127,7 @@ struct DeviceScene {
 DeviceScene createDemoScene();
 DeviceScene createObjScene(const char* filename);
 DeviceScene createCornellScene(const char* filename, float objectScale, const Vec3& objectTranslation);
+DeviceScene createGltfScene(const char* filename);
 void buildTlasBlas(DeviceScene& deviceScene, std::vector<MeshAsset>& meshes, const std::vector<SceneInstance>& instances, const std::vector<Material>& materials);
 void addStaticTriangleLights(DeviceScene& deviceScene, std::vector<Triangle>& triangles, const std::vector<Material>& materials);
 void uploadTriangleLights(DeviceScene& deviceScene);

@@ -10,11 +10,6 @@ struct Sphere {
     uint32_t material;
 };
 
-struct Vec2 {
-    float x;
-    float y;
-};
-
 struct Triangle {
     Vec3 v0;
     Vec3 v1;
@@ -28,10 +23,20 @@ struct Triangle {
     Vec2 uv1;
     Vec2 uv2;
 
+    Vec2 uv1_0;
+    Vec2 uv1_1;
+    Vec2 uv1_2;
+
+    Vec3 tangent;
+    Vec3 bitangent;
+    Vec3 tangent1;
+    Vec3 bitangent1;
+
     uint32_t material;
     uint32_t lightIndex;
     bool hasVertexNormals;
     bool hasTexcoords;
+    bool hasTexcoords1;
 };
 
 constexpr uint32_t invalidLightIndex = 0xffffffffu;
@@ -56,6 +61,11 @@ struct Hit {
     Vec3 position;
     Vec3 normal;
     Vec2 uv;
+    Vec2 uv1;
+    Vec3 tangent;
+    Vec3 bitangent;
+    Vec3 tangent1;
+    Vec3 bitangent1;
 
     uint32_t material;
     uint32_t lightIndex;

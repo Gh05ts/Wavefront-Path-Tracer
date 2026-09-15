@@ -3,6 +3,11 @@
 #include <cuda_runtime.h>
 #include <cmath>
 
+struct Vec2 {
+    float x;
+    float y;
+};
+
 struct Vec3 {
     float x;
     float y;

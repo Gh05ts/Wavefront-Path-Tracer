@@ -61,14 +61,17 @@ int main() {
 
     std::cout << "Starting wavefront path tracer\n";
 
+    constexpr bool useGltfScene = true;
     constexpr bool useCornellScene = true;
-    Camera camera = useCornellScene ? createCornellCamera(width, height) : createDemoCamera(width, height);
+    Camera camera = useCornellScene && !useGltfScene ? createCornellCamera(width, height) : createDemoCamera(width, height);
     constexpr bool useObjScene = true;
     constexpr char sceneObjectFilename[] = "../assets/deer-obj.obj";
+    constexpr char gltfFilename[] = "../assets/DragonAttenuation.gltf";
     constexpr float sceneObjectScale = 0.1f;
     const Vec3 sceneObjectTranslation(0.181f, -0.906f, -0.2f);
-    DeviceScene deviceScene = useCornellScene ? createCornellScene(sceneObjectFilename, sceneObjectScale, sceneObjectTranslation) :
-        (useObjScene ? createObjScene(sceneObjectFilename) : createDemoScene());
+    DeviceScene deviceScene = useGltfScene ? createGltfScene(gltfFilename) :
+        (useCornellScene ? createCornellScene(sceneObjectFilename, sceneObjectScale, sceneObjectTranslation) :
+        (useObjScene ? createObjScene(sceneObjectFilename) : createDemoScene()));
 
     // --------------------------------------------------------
     // Path states

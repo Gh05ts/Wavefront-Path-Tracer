@@ -21,6 +21,7 @@ add_executable(pathtracer
     src/scene/bvh.cpp
     src/scene/bvh_sbvh.cpp
     src/scene/obj_loader.cpp
+    src/scene/gltf_loader.cpp
     src/renderer/renderer.cu
     src/renderer/render_session.cu
     src/renderer/render_checkpoint.cpp
@@ -32,6 +33,7 @@ target_include_directories(pathtracer
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/extern/tinyobjloader
         ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
+        ${CMAKE_CURRENT_SOURCE_DIR}/extern/tinygltf
 )
 
 target_link_libraries(pathtracer

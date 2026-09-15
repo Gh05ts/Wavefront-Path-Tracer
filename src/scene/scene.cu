@@ -1,5 +1,6 @@
 #include "scene/scene.cuh"
 #include "scene/bvh.cuh"
+#include "scene/gltf_loader.hpp"
 #include "scene/obj_loader.hpp"
 
 #include <NXB/BVHBuilder.h>
@@ -425,6 +426,34 @@ DeviceScene createCornellScene(const char* filename, float objectScale, const Ve
 
     float bvhBuildMilliseconds = std::chrono::duration<float, std::milli>(bvhBuildEnd - bvhBuildStart).count();
     std::cout << "Built Cornell TLAS/BLAS BVH2 with " << deviceScene.blasBvhs.size() << " BLASes and " << deviceScene.tlas.NodeCount() << " TLAS nodes for " << objectTriangleCount << " object triangles in " << bvhBuildMilliseconds << " ms\n";
+
+    return deviceScene;
+}
+
+DeviceScene createGltfScene(const char* filename) {
+    GltfScene gltfScene = loadGltfScene(filename);
+
+    if (gltfScene.meshes.empty() || gltfScene.instances.empty()) {
+        std::cerr << "glTF scene contains no renderable mesh instances\n";
+        std::exit(1);
+    }
+
+    DeviceScene deviceScene{};
+    auto bvhBuildStart = std::chrono::steady_clock::now();
+    buildTlasBlas(deviceScene, gltfScene.meshes, gltfScene.instances, gltfScene.materials);
+    uploadTriangleLights(deviceScene);
+    auto bvhBuildEnd = std::chrono::steady_clock::now();
+
+    checkCuda(cudaMalloc(&deviceScene.materials, sizeof(Material) * gltfScene.materials.size()));
+    checkCuda(cudaMemcpy(deviceScene.materials, gltfScene.materials.data(), sizeof(Material) * gltfScene.materials.size(), cudaMemcpyHostToDevice));
+    uploadTextures(deviceScene, gltfScene.textures);
+
+    deviceScene.scene.materials = deviceScene.materials;
+    deviceScene.scene.materialCount = static_cast<uint32_t>(gltfScene.materials.size());
+    deviceScene.scene.blackBackground = false;
+
+    float bvhBuildMilliseconds = std::chrono::duration<float, std::milli>(bvhBuildEnd - bvhBuildStart).count();
+    std::cout << "Built glTF TLAS/BLAS BVH2 with " << deviceScene.blasBvhs.size() << " BLASes, " << deviceScene.tlas.NodeCount() << " TLAS nodes, " << deviceScene.scene.lightCount << " triangle lights, and " << deviceScene.scene.instanceCount << " instances in " << bvhBuildMilliseconds << " ms\n";
 
     return deviceScene;
 }
