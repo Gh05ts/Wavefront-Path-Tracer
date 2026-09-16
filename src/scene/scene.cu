@@ -452,7 +452,7 @@ DeviceScene createGltfScene(const char* filename, float sceneScale, bool addTopL
     std::vector<Triangle> hostStaticTriangles;
     if (addTopLight) {
         uint32_t lightMaterial = static_cast<uint32_t>(gltfScene.materials.size());
-        gltfScene.materials.push_back(makeMaterial(MaterialType::Emissive, Vec3(1.0f, 1.0f, 1.0f), Vec3(50.0f, 50.0f, 50.0f)));
+        gltfScene.materials.push_back(makeMaterial(MaterialType::Emissive, Vec3(1.0f, 1.0f, 1.0f), Vec3(80.0f, 80.0f, 80.0f)));
 
         const Vec3 lightCorner(-4.0f, 9.2f, -4.0f);
         const Vec3 lightEdgeU(8.0f, 0.0f, 0.0f);

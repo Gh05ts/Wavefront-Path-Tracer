@@ -151,7 +151,7 @@ int main() {
 
     constexpr uint32_t maxDepth = 32;
     constexpr uint32_t russianRouletteStartDepth = 12;
-    constexpr uint32_t samplesPerPixel = useIntersectionDebug || useShadingNormalDebug ? 1 : 256;
+    constexpr uint32_t samplesPerPixel = useIntersectionDebug || useShadingNormalDebug ? 1 : 512;
     constexpr bool resumeFromCheckpoint = false;
     constexpr char checkpointFilename[] = "render.checkpoint";
     constexpr uint32_t checkpointProgressPercent = 25;
