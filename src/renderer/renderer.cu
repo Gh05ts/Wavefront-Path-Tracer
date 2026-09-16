@@ -173,6 +173,12 @@ Vec3 getTriangleNormal(const Triangle& triangle, const Ray& ray, float u, float 
 }
 
 __device__
+Vec3 getTriangleGeometricNormal(const Triangle& triangle, const Ray& ray) {
+    Vec3 normal = normalize(cross(triangle.v1 - triangle.v0, triangle.v2 - triangle.v0));
+    return dot(normal, ray.direction) > 0.0f ? -normal : normal;
+}
+
+__device__
 Vec2 getTriangleUv(const Triangle& triangle, float u, float v, bool secondSet) {
     if ((!secondSet && !triangle.hasTexcoords) || (secondSet && !triangle.hasTexcoords1))
         return Vec2{0.0f, 0.0f};
@@ -190,7 +196,7 @@ __device__
 float getMaterialOpacity(const Material& material, const Vec2& uv, const Vec2& uv1, Scene scene);
 
 __device__
-bool intersectTriangleHit(const Ray& ray, const Triangle& triangle, Scene scene, float& closestT, int& closestMaterial, Vec3& closestNormal, Vec2& closestUv, Vec2& closestUv1, Vec3& closestTangent, Vec3& closestBitangent, Vec3& closestTangent1, Vec3& closestBitangent1, uint32_t& closestLightIndex) {
+bool intersectTriangleHit(const Ray& ray, const Triangle& triangle, Scene scene, float& closestT, int& closestMaterial, Vec3& closestGeometricNormal, Vec3& closestNormal, Vec2& closestUv, Vec2& closestUv1, Vec3& closestTangent, Vec3& closestBitangent, Vec3& closestTangent1, Vec3& closestBitangent1, uint32_t& closestLightIndex) {
     float t;
     float u;
     float v;
@@ -206,11 +212,27 @@ bool intersectTriangleHit(const Ray& ray, const Triangle& triangle, Scene scene,
 
     closestT = t;
     closestMaterial = static_cast<int>(triangle.material);
+    closestGeometricNormal = getTriangleGeometricNormal(triangle, ray);
     closestNormal = getTriangleNormal(triangle, ray, u, v);
     closestUv = uv;
     closestUv1 = uv1;
-    closestTangent = triangle.tangent;
-    closestBitangent = triangle.bitangent;
+    if (triangle.hasVertexTangents) {
+        float w = 1.0f - u - v;
+        Vec3 tangent = w * triangle.vertexTangent0 + u * triangle.vertexTangent1 + v * triangle.vertexTangent2;
+        tangent = tangent - closestNormal * dot(closestNormal, tangent);
+
+        if (lengthSquared(tangent) > 0.00000001f) {
+            closestTangent = normalize(tangent);
+            float sign = w * triangle.vertexTangentSign0 + u * triangle.vertexTangentSign1 + v * triangle.vertexTangentSign2;
+            closestBitangent = (sign < 0.0f ? -1.0f : 1.0f) * normalize(cross(closestNormal, closestTangent));
+        } else {
+            closestTangent = triangle.tangent;
+            closestBitangent = triangle.bitangent;
+        }
+    } else {
+        closestTangent = triangle.tangent;
+        closestBitangent = triangle.bitangent;
+    }
     closestTangent1 = triangle.tangent1;
     closestBitangent1 = triangle.bitangent1;
     closestLightIndex = triangle.lightIndex;
@@ -267,7 +289,7 @@ bool intersectNexusBvh8ChildAabb(const Ray& ray, const Vec3& inverseDirection, c
 }
 
 __device__
-void intersectNexusBvh2(const Ray& ray, const Triangle* triangles, const NXB::BVH2::DeviceView& bvh, Scene scene, float& closestT, int& closestMaterial, Vec3& closestNormal, Vec2& closestUv, Vec2& closestUv1, Vec3& closestTangent, Vec3& closestBitangent, Vec3& closestTangent1, Vec3& closestBitangent1, uint32_t& closestLightIndex) {
+void intersectNexusBvh2(const Ray& ray, const Triangle* triangles, const NXB::BVH2::DeviceView& bvh, Scene scene, float& closestT, int& closestMaterial, Vec3& closestGeometricNormal, Vec3& closestNormal, Vec2& closestUv, Vec2& closestUv1, Vec3& closestTangent, Vec3& closestBitangent, Vec3& closestTangent1, Vec3& closestBitangent1, uint32_t& closestLightIndex) {
     constexpr uint32_t maxBvhStackSize = 64;
     uint32_t stack[maxBvhStackSize];
     uint32_t stackSize = 1;
@@ -295,11 +317,27 @@ void intersectNexusBvh2(const Ray& ray, const Triangle* triangles, const NXB::BV
 
                 closestT = t;
                 closestMaterial = static_cast<int>(triangle.material);
+                closestGeometricNormal = getTriangleGeometricNormal(triangle, ray);
                 closestNormal = getTriangleNormal(triangle, ray, u, v);
                 closestUv = uv;
                 closestUv1 = uv1;
-                closestTangent = triangle.tangent;
-                closestBitangent = triangle.bitangent;
+                if (triangle.hasVertexTangents) {
+                    float w = 1.0f - u - v;
+                    Vec3 tangent = w * triangle.vertexTangent0 + u * triangle.vertexTangent1 + v * triangle.vertexTangent2;
+                    tangent = tangent - closestNormal * dot(closestNormal, tangent);
+
+                    if (lengthSquared(tangent) > 0.00000001f) {
+                        closestTangent = normalize(tangent);
+                        float sign = w * triangle.vertexTangentSign0 + u * triangle.vertexTangentSign1 + v * triangle.vertexTangentSign2;
+                        closestBitangent = (sign < 0.0f ? -1.0f : 1.0f) * normalize(cross(closestNormal, closestTangent));
+                    } else {
+                        closestTangent = triangle.tangent;
+                        closestBitangent = triangle.bitangent;
+                    }
+                } else {
+                    closestTangent = triangle.tangent;
+                    closestBitangent = triangle.bitangent;
+                }
                 closestTangent1 = triangle.tangent1;
                 closestBitangent1 = triangle.bitangent1;
                 closestLightIndex = triangle.lightIndex;
@@ -362,6 +400,7 @@ bool isOccluded(const Ray& ray, float maximumDistance, Scene scene) {
 
                 float closestT = maximumDistance;
                 int closestMaterial = -1;
+                Vec3 closestGeometricNormal;
                 Vec3 closestNormal;
                 Vec2 closestUv;
                 Vec2 closestUv1;
@@ -370,7 +409,7 @@ bool isOccluded(const Ray& ray, float maximumDistance, Scene scene) {
                 Vec3 closestTangent1;
                 Vec3 closestBitangent1;
                 uint32_t closestLightIndex;
-                intersectNexusBvh2(localRay, blas.triangles, blas.bvh, scene, closestT, closestMaterial, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
+                intersectNexusBvh2(localRay, blas.triangles, blas.bvh, scene, closestT, closestMaterial, closestGeometricNormal, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
 
                 if (closestMaterial >= 0)
                     return true;
@@ -402,41 +441,6 @@ float powerHeuristic(float firstPdf, float secondPdf) {
     float firstSquared = firstPdf * firstPdf;
     float secondSquared = secondPdf * secondPdf;
     return firstSquared / (firstSquared + secondSquared);
-}
-
-__device__
-Vec2 getEnvironmentUv(const Vec3& direction) {
-    constexpr float inverseTwoPi = 0.15915494309f;
-    constexpr float inversePi = 0.31830988618f;
-    Vec3 normalizedDirection = normalize(direction);
-    return Vec2{
-        atan2f(normalizedDirection.z, normalizedDirection.x) * inverseTwoPi + 0.5f,
-        acosf(fminf(1.0f, fmaxf(-1.0f, normalizedDirection.y))) * inversePi};
-}
-
-__device__
-Vec3 sampleEnvironment(const EnvironmentLight& environment, const Vec3& direction) {
-    if (!environment.enabled)
-        return Vec3(0.0f, 0.0f, 0.0f);
-
-    Vec2 uv = getEnvironmentUv(direction);
-    float4 texel = tex2D<float4>(environment.texture, uv.x, uv.y);
-    return environment.intensity * Vec3(texel.x, texel.y, texel.z);
-}
-
-__device__
-float environmentPdf(const EnvironmentLight& environment, const Vec3& direction) {
-    if (!environment.enabled)
-        return 0.0f;
-
-    Vec2 uv = getEnvironmentUv(direction);
-    uint32_t x = min(static_cast<uint32_t>(uv.x * environment.width), environment.width - 1);
-    uint32_t y = min(static_cast<uint32_t>(uv.y * environment.height), environment.height - 1);
-    uint32_t index = y * environment.width + x;
-    float previous = index == 0 ? 0.0f : environment.cdf[index - 1];
-    float selectionPdf = environment.cdf[index] - previous;
-    float sine = sinf(3.14159265359f * (static_cast<float>(y) + 0.5f) / static_cast<float>(environment.height));
-    return selectionPdf * static_cast<float>(environment.width * environment.height) / (19.7392088022f * fmaxf(sine, 1e-4f));
 }
 
 __device__
@@ -510,28 +514,57 @@ float getMaterialThickness(const Material& material, const Hit& hit, Scene scene
 
 __device__
 Vec3 getMaterialNormal(const Material& material, const Hit& hit, Scene scene) {
-    if (material.normalTexture.texture == invalidTextureIndex || material.normalTexture.texture >= scene.textureCount)
+    if (!scene.useNormalMaps || material.normalTexture.texture == invalidTextureIndex || material.normalTexture.texture >= scene.textureCount)
         return hit.normal;
 
     Vec3 tangent = material.normalTexture.texCoord == 1 ? hit.tangent1 : hit.tangent;
     Vec3 bitangent = material.normalTexture.texCoord == 1 ? hit.bitangent1 : hit.bitangent;
 
-    if (lengthSquared(tangent) == 0.0f || lengthSquared(bitangent) == 0.0f)
+    if (!isfinite(tangent.x) || !isfinite(tangent.y) || !isfinite(tangent.z) ||
+        !isfinite(bitangent.x) || !isfinite(bitangent.y) || !isfinite(bitangent.z) ||
+        lengthSquared(tangent) < 0.00000001f || lengthSquared(bitangent) < 0.00000001f)
         return hit.normal;
 
     tangent = normalize(tangent - hit.normal * dot(hit.normal, tangent));
     bitangent = normalize(cross(hit.normal, tangent));
+
+    if (!isfinite(tangent.x) || !isfinite(tangent.y) || !isfinite(tangent.z) ||
+        !isfinite(bitangent.x) || !isfinite(bitangent.y) || !isfinite(bitangent.z))
+        return hit.normal;
 
     if (dot(bitangent, material.normalTexture.texCoord == 1 ? hit.bitangent1 : hit.bitangent) < 0.0f)
         bitangent = -bitangent;
 
     float4 texel = sampleTexture(material.normalTexture, hit, scene, make_float4(0.5f, 0.5f, 1.0f, 1.0f));
     Vec3 tangentNormal((texel.x * 2.0f - 1.0f) * material.normalScale, (texel.y * 2.0f - 1.0f) * material.normalScale, texel.z * 2.0f - 1.0f);
-    return normalize(tangent * tangentNormal.x + bitangent * tangentNormal.y + hit.normal * tangentNormal.z);
+    tangentNormal = normalize(tangentNormal);
+
+    if (scene.normalMapMinimumCosine > 0.0f && tangentNormal.z < scene.normalMapMinimumCosine) {
+        float minimumCosine = fminf(scene.normalMapMinimumCosine, 1.0f);
+        float tangentLength = sqrtf(fmaxf(0.0f, tangentNormal.x * tangentNormal.x + tangentNormal.y * tangentNormal.y));
+
+        if (tangentLength > 0.0f) {
+            float scale = sqrtf(fmaxf(0.0f, 1.0f - minimumCosine * minimumCosine)) / tangentLength;
+            tangentNormal.x *= scale;
+            tangentNormal.y *= scale;
+        } else {
+            tangentNormal.x = 0.0f;
+            tangentNormal.y = 0.0f;
+        }
+
+        tangentNormal.z = minimumCosine;
+    }
+
+    Vec3 normal = tangent * tangentNormal.x + bitangent * tangentNormal.y + hit.normal * tangentNormal.z;
+
+    if (!isfinite(normal.x) || !isfinite(normal.y) || !isfinite(normal.z) || lengthSquared(normal) < 0.00000001f)
+        return hit.normal;
+
+    return normalize(normal);
 }
 
 __device__
-void sampleDirectLight(PathState& path, const Hit& hit, const Material& material, Scene scene) {
+void sampleDirectLight(PathState& path, const Hit& hit, const Hit& shadedHit, const Material& material, Scene scene) {
     if (scene.lightCount == 0)
         return;
 
@@ -545,69 +578,25 @@ void sampleDirectLight(PathState& path, const Hit& hit, const Material& material
     float distanceSquared = lengthSquared(toLight);
     float distance = sqrtf(distanceSquared);
     Vec3 direction = toLight / distance;
-    float surfaceCosine = fmaxf(0.0f, dot(hit.normal, direction));
+    float geometricCosine = fmaxf(0.0f, dot(hit.geometricNormal, direction));
+    float shadingCosine = fmaxf(0.0f, dot(shadedHit.normal, direction));
     float lightCosine = fmaxf(0.0f, dot(light.normal, -direction));
 
-    if (surfaceCosine == 0.0f || lightCosine == 0.0f)
+    if (geometricCosine == 0.0f || shadingCosine == 0.0f || lightCosine == 0.0f)
         return;
 
-    Ray shadowRay(hit.position + direction * 0.001f, direction);
+    Ray shadowRay(hit.position + hit.geometricNormal * 0.001f, direction);
 
-    if (isOccluded(shadowRay, distance - 0.002f, scene))
+    if (!scene.ignoreDirectLightOcclusion && isOccluded(shadowRay, distance - 0.002f, scene))
         return;
 
     const Material& lightMaterial = scene.materials[light.material];
     constexpr float inversePi = 0.31830988618f;
-    float geometryTerm = surfaceCosine * lightCosine * light.area / (distanceSquared * light.selectionPdf);
+    float geometryTerm = shadingCosine * lightCosine * light.area / (distanceSquared * light.selectionPdf);
     float lightPdf = light.selectionPdf * distanceSquared / (lightCosine * light.area);
-    float bsdfPdf = surfaceCosine * inversePi;
+    float bsdfPdf = shadingCosine * inversePi;
     float misWeight = powerHeuristic(lightPdf, bsdfPdf);
-    Vec3 directLighting = hadamard(getMaterialAlbedo(material, hit, scene), lightMaterial.emission) * (inversePi * geometryTerm * misWeight);
-    path.radiance += hadamard(path.throughput, directLighting);
-}
-
-__device__
-void sampleDirectEnvironment(PathState& path, const Hit& hit, const Material& material, Scene scene) {
-    const EnvironmentLight& environment = scene.environment;
-    if (!environment.enabled)
-        return;
-
-    uint32_t count = environment.width * environment.height;
-    float sample = randomFloat(path.rngState);
-    uint32_t low = 0;
-    uint32_t high = count - 1;
-    while (low < high) {
-        uint32_t middle = low + (high - low) / 2;
-        if (environment.cdf[middle] < sample)
-            low = middle + 1;
-        else
-            high = middle;
-    }
-
-    uint32_t x = low % environment.width;
-    uint32_t y = low / environment.width;
-    float u = (static_cast<float>(x) + randomFloat(path.rngState)) / static_cast<float>(environment.width);
-    float v = (static_cast<float>(y) + randomFloat(path.rngState)) / static_cast<float>(environment.height);
-    float phi = 6.28318530718f * (u - 0.5f);
-    float theta = 3.14159265359f * v;
-    float sine = sinf(theta);
-    Vec3 direction(cosf(phi) * sine, cosf(theta), sinf(phi) * sine);
-    float surfaceCosine = fmaxf(0.0f, dot(hit.normal, direction));
-    if (surfaceCosine == 0.0f)
-        return;
-
-    Ray shadowRay(hit.position + direction * 0.001f, direction);
-    if (isOccluded(shadowRay, 1e30f, scene))
-        return;
-
-    float lightPdf = environmentPdf(environment, direction);
-    if (lightPdf == 0.0f)
-        return;
-
-    constexpr float inversePi = 0.31830988618f;
-    float bsdfPdf = surfaceCosine * inversePi;
-    float misWeight = powerHeuristic(lightPdf, bsdfPdf);
-    Vec3 directLighting = hadamard(getMaterialAlbedo(material, hit, scene), sampleEnvironment(environment, direction)) * (surfaceCosine * inversePi * misWeight / lightPdf);
+    Vec3 directLighting = hadamard(getMaterialAlbedo(material, shadedHit, scene), lightMaterial.emission) * (inversePi * geometryTerm * misWeight);
     path.radiance += hadamard(path.throughput, directLighting);
 }
 
@@ -623,6 +612,7 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
 
     float closestT = 1e30f;
     int closestMaterial = -1;
+    Vec3 closestGeometricNormal;
     Vec3 closestNormal;
     Vec2 closestUv{0.0f, 0.0f};
     Vec2 closestUv1{0.0f, 0.0f};
@@ -643,6 +633,7 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
                 Vec3 position = work.ray.at(t);
 
                 closestNormal = normalize(position - scene.spheres[i].center);
+                closestGeometricNormal = closestNormal;
                 closestLightIndex = invalidLightIndex;
             }
         }
@@ -650,7 +641,7 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
 
     for (uint32_t i = 0; i < scene.staticTriangleCount; ++i) {
         const Triangle& triangle = scene.staticTriangles[i];
-        intersectTriangleHit(work.ray, triangle, scene, closestT, closestMaterial, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
+        intersectTriangleHit(work.ray, triangle, scene, closestT, closestMaterial, closestGeometricNormal, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
     }
 
     if (scene.tlas.nodes != nullptr) {
@@ -674,6 +665,7 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
                 localRay.direction = inverseTransformVector(instance.transform, work.ray.direction);
                 float instanceClosestT = closestT;
                 int instanceMaterial = -1;
+                Vec3 instanceGeometricNormal;
                 Vec3 instanceNormal;
                 Vec2 instanceUv;
                 Vec2 instanceUv1;
@@ -682,11 +674,12 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
                 Vec3 instanceTangent1;
                 Vec3 instanceBitangent1;
                 uint32_t instanceLightIndex = invalidLightIndex;
-                intersectNexusBvh2(localRay, blas.triangles, blas.bvh, scene, instanceClosestT, instanceMaterial, instanceNormal, instanceUv, instanceUv1, instanceTangent, instanceBitangent, instanceTangent1, instanceBitangent1, instanceLightIndex);
+                intersectNexusBvh2(localRay, blas.triangles, blas.bvh, scene, instanceClosestT, instanceMaterial, instanceGeometricNormal, instanceNormal, instanceUv, instanceUv1, instanceTangent, instanceBitangent, instanceTangent1, instanceBitangent1, instanceLightIndex);
 
                 if (instanceMaterial >= 0) {
                     closestT = instanceClosestT;
                     closestMaterial = instanceMaterial;
+                    closestGeometricNormal = transformNormal(instance.transform, instanceGeometricNormal);
                     closestNormal = transformNormal(instance.transform, instanceNormal);
                     closestUv = instanceUv;
                     closestUv1 = instanceUv1;
@@ -731,7 +724,7 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
             if (entry.triangleCount > 0) {
                 for (uint32_t i = 0; i < entry.triangleCount; ++i) {
                     const Triangle& triangle = scene.triangles[scene.nexusBvh8.primIdx[entry.index + i]];
-                    intersectTriangleHit(work.ray, triangle, scene, closestT, closestMaterial, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
+                    intersectTriangleHit(work.ray, triangle, scene, closestT, closestMaterial, closestGeometricNormal, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
                 }
 
                 continue;
@@ -794,7 +787,7 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
 
             if (node.leftChild == NXB::InvalidIdx) {
                 const Triangle& triangle = scene.triangles[node.rightChild];
-                intersectTriangleHit(work.ray, triangle, scene, closestT, closestMaterial, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
+                intersectTriangleHit(work.ray, triangle, scene, closestT, closestMaterial, closestGeometricNormal, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
             } else {
                 float leftNearT;
                 float rightNearT;
@@ -829,7 +822,7 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
             if (node.triangleCount > 0) {
                 for (uint32_t i = 0; i < node.triangleCount; ++i) {
                     const Triangle& triangle = scene.triangles[scene.bvhTriangleIndices[node.firstTriangle + i]];
-                    intersectTriangleHit(work.ray, triangle, scene, closestT, closestMaterial, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
+                    intersectTriangleHit(work.ray, triangle, scene, closestT, closestMaterial, closestGeometricNormal, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
                 }
             } else {
                 float leftNearT;
@@ -851,7 +844,7 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
         }
     } else {
         for (uint32_t i = 0; i < scene.triangleCount; ++i) {
-            intersectTriangleHit(work.ray, scene.triangles[i], scene, closestT, closestMaterial, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
+            intersectTriangleHit(work.ray, scene.triangles[i], scene, closestT, closestMaterial, closestGeometricNormal, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
         }
     }
 
@@ -866,6 +859,7 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
 
     hit.t = closestT;
     hit.position = position;
+    hit.geometricNormal = closestGeometricNormal;
     hit.normal = closestNormal;
     hit.uv = closestUv;
     hit.uv1 = closestUv1;
@@ -880,7 +874,7 @@ void intersectScene(RayQueue rays, IntersectionResult* results, Scene scene) {
 }
 
 __global__
-void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextRays, PathState* pathStates, Scene scene, uint32_t maxDepth, uint32_t russianRouletteStartDepth, Vec3* framebuffer) {
+void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextRays, PathState* pathStates, Scene scene, uint32_t maxDepth, uint32_t russianRouletteStartDepth, bool intersectionDebug, bool shadingNormalDebug, Vec3* framebuffer) {
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     uint32_t rayCount = *rays.count;
 
@@ -891,11 +885,28 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
         const RayWorkItem& work = rays.items[index];
         PathState& path = pathStates[work.pathIndex];
 
-        if (!results[index].didHit) {
-            if (scene.environment.enabled) {
-                float misWeight = path.depth > 0 && !path.specularBounce ? powerHeuristic(path.previousBsdfPdf, environmentPdf(scene.environment, path.ray.direction)) : 1.0f;
-                path.radiance += hadamard(path.throughput, sampleEnvironment(scene.environment, path.ray.direction)) * misWeight;
-            } else if (!scene.blackBackground) {
+        if (intersectionDebug) {
+            Vec3 color(0.05f, 0.10f, 0.25f);
+
+            if (results[index].didHit)
+                color = 0.5f * (results[index].hit.normal + Vec3(1.0f, 1.0f, 1.0f));
+
+            path.active = false;
+            framebuffer[path.pixelIndex] += color;
+        } else if (shadingNormalDebug) {
+            Vec3 color(0.05f, 0.10f, 0.25f);
+
+            if (results[index].didHit) {
+                const Hit& hit = results[index].hit;
+                const Material& material = scene.materials[hit.material];
+                Vec3 normal = getMaterialNormal(material, hit, scene);
+                color = 0.5f * (normal + Vec3(1.0f, 1.0f, 1.0f));
+            }
+
+            path.active = false;
+            framebuffer[path.pixelIndex] += color;
+        } else if (!results[index].didHit) {
+            if (!scene.blackBackground) {
                 float t = 0.5f * (path.ray.direction.y + 1.0f);
                 Vec3 sky = (1.0f - t) * Vec3(1.0f, 1.0f, 1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
                 path.radiance += hadamard(path.throughput, sky);
@@ -940,28 +951,38 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
                 Vec3 direction;
                 Hit shadedHit = hit;
                 shadedHit.normal = getMaterialNormal(material, hit, scene);
+
+                if (dot(shadedHit.normal, hit.geometricNormal) < 0.0f)
+                    shadedHit.normal = -shadedHit.normal;
+
                 Vec3 albedo = getMaterialAlbedo(material, shadedHit, scene);
                 MaterialType materialType = material.type == MaterialType::Diffuse && getMaterialMetallic(material, shadedHit, scene) > 0.5f ? MaterialType::Metal : material.type;
                 float roughness = getMaterialRoughness(material, shadedHit, scene);
 
                 switch (materialType) {
-                case MaterialType::Diffuse:
-                    sampleDirectLight(path, shadedHit, material, scene);
-                    sampleDirectEnvironment(path, shadedHit, material, scene);
+                case MaterialType::Diffuse: {
+                    sampleDirectLight(path, hit, shadedHit, material, scene);
+                    Vec3 samplingNormal = shadedHit.normal;
+                    direction = sampleCosineHemisphere(samplingNormal, path.rngState);
+
+                    if (dot(direction, hit.geometricNormal) <= 0.0f) {
+                        samplingNormal = hit.geometricNormal;
+                        direction = sampleCosineHemisphere(samplingNormal, path.rngState);
+                    }
+
                     path.throughput = hadamard(path.throughput, albedo);
-                    direction = sampleCosineHemisphere(shadedHit.normal, path.rngState);
-                    path.previousBsdfPdf = fmaxf(0.0f, dot(shadedHit.normal, direction)) * 0.31830988618f;
+                    path.previousBsdfPdf = fmaxf(0.0f, dot(samplingNormal, direction)) * 0.31830988618f;
                     path.specularBounce = false;
                     break;
+                }
 
                 case MaterialType::Metal: {
                     path.throughput = hadamard(path.throughput, albedo);
                     Vec3 reflected = reflect(normalize(path.ray.direction), shadedHit.normal);
                     direction = normalize(reflected + roughness * randomInUnitSphere(path.rngState));
 
-                    if (dot(direction, shadedHit.normal) <= 0.0f)
-                        path.active = false;
-
+                    if (dot(direction, shadedHit.normal) <= 0.0f || dot(direction, hit.geometricNormal) <= 0.0f)
+                        direction = reflect(normalize(path.ray.direction), hit.geometricNormal);
                     path.specularBounce = true;
                     path.previousBsdfPdf = 0.0f;
 
@@ -1004,7 +1025,8 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
                 }
 
                 if (path.active) {
-                    path.ray.origin = hit.position + direction * 0.001f;
+                    float offsetDirection = dot(direction, hit.geometricNormal) >= 0.0f ? 1.0f : -1.0f;
+                    path.ray.origin = hit.position + offsetDirection * hit.geometricNormal * 0.001f;
                     path.ray.direction = direction;
                     ++path.depth;
 

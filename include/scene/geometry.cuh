@@ -32,9 +32,18 @@ struct Triangle {
     Vec3 tangent1;
     Vec3 bitangent1;
 
+    Vec3 vertexTangent0;
+    Vec3 vertexTangent1;
+    Vec3 vertexTangent2;
+
+    float vertexTangentSign0;
+    float vertexTangentSign1;
+    float vertexTangentSign2;
+
     uint32_t material;
     uint32_t lightIndex;
     bool hasVertexNormals;
+    bool hasVertexTangents;
     bool hasTexcoords;
     bool hasTexcoords1;
 };
@@ -59,6 +68,7 @@ struct LightAliasEntry {
 struct Hit {
     float t;
     Vec3 position;
+    Vec3 geometricNormal;
     Vec3 normal;
     Vec2 uv;
     Vec2 uv1;

@@ -38,5 +38,7 @@ void shadePaths(
     Scene scene,
     uint32_t maxDepth,
     uint32_t russianRouletteStartDepth,
+    bool intersectionDebug,
+    bool shadingNormalDebug,
     Vec3* framebuffer
 );

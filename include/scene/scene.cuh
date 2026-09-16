@@ -65,15 +65,6 @@ struct SceneInstance {
     InstanceTransform transform;
 };
 
-struct EnvironmentLight {
-    cudaTextureObject_t texture;
-    float* cdf;
-    uint32_t width;
-    uint32_t height;
-    float intensity;
-    bool enabled;
-};
-
 struct Scene {
     Sphere* spheres;
     uint32_t sphereCount;
@@ -105,8 +96,10 @@ struct Scene {
     TriangleLight* lights;
     LightAliasEntry* lightAlias;
     uint32_t lightCount;
-    EnvironmentLight environment;
     bool blackBackground;
+    bool ignoreDirectLightOcclusion;
+    bool useNormalMaps;
+    float normalMapMinimumCosine;
 };
 
 struct DeviceScene {
@@ -128,9 +121,6 @@ struct DeviceScene {
     Texture* textures;
     TriangleLight* lights;
     LightAliasEntry* lightAlias;
-    float* environmentCdf;
-    cudaArray_t environmentArray;
-    cudaTextureObject_t environmentTexture;
     std::vector<TriangleLight> hostLights;
     std::vector<float> lightWeights;
     std::vector<cudaArray_t> textureArrays;
@@ -140,7 +130,7 @@ struct DeviceScene {
 DeviceScene createDemoScene();
 DeviceScene createObjScene(const char* filename);
 DeviceScene createCornellScene(const char* filename, float objectScale, const Vec3& objectTranslation);
-DeviceScene createGltfScene(const char* filename, const char* environmentFilename = nullptr, float environmentIntensity = 1.0f);
+DeviceScene createGltfScene(const char* filename, float sceneScale, bool addTopLight);
 void buildTlasBlas(DeviceScene& deviceScene, std::vector<MeshAsset>& meshes, const std::vector<SceneInstance>& instances, const std::vector<Material>& materials);
 void addStaticTriangleLights(DeviceScene& deviceScene, std::vector<Triangle>& triangles, const std::vector<Material>& materials);
 void uploadTriangleLights(DeviceScene& deviceScene);

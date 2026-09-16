@@ -182,7 +182,14 @@ Vec3 readVec3(const tinygltf::Model& model, const tinygltf::Accessor& accessor, 
 Vec2 readVec2(const tinygltf::Model& model, const tinygltf::Accessor& accessor, uint32_t index) {
     size_t stride;
     const float* value = reinterpret_cast<const float*>(getAccessorData(model, accessor, stride) + stride * index);
-    return Vec2{value[0], value[1]};
+    return Vec2{value[0], 1.0f - value[1]};
+}
+
+void readTangent(const tinygltf::Model& model, const tinygltf::Accessor& accessor, uint32_t index, Vec3& tangent, float& sign) {
+    size_t stride;
+    const float* value = reinterpret_cast<const float*>(getAccessorData(model, accessor, stride) + stride * index);
+    tangent = Vec3(value[0], value[1], value[2]);
+    sign = value[3];
 }
 
 uint32_t readIndex(const tinygltf::Model& model, const tinygltf::Accessor& accessor, uint32_t index) {
@@ -320,9 +327,11 @@ GltfScene loadGltfScene(const char* filename) {
             const tinygltf::Accessor& positions = model.accessors[position->second];
             const tinygltf::Accessor& indices = model.accessors[primitive.indices];
             auto normal = primitive.attributes.find("NORMAL");
+            auto tangent = primitive.attributes.find("TANGENT");
             auto texcoord = primitive.attributes.find("TEXCOORD_0");
             auto texcoord1 = primitive.attributes.find("TEXCOORD_1");
             const tinygltf::Accessor* normals = normal == primitive.attributes.end() ? nullptr : &model.accessors[normal->second];
+            const tinygltf::Accessor* tangents = tangent == primitive.attributes.end() ? nullptr : &model.accessors[tangent->second];
             const tinygltf::Accessor* texcoords = texcoord == primitive.attributes.end() ? nullptr : &model.accessors[texcoord->second];
             const tinygltf::Accessor* texcoords1 = texcoord1 == primitive.attributes.end() ? nullptr : &model.accessors[texcoord1->second];
             MeshAsset asset;
@@ -338,12 +347,18 @@ GltfScene loadGltfScene(const char* filename) {
                 triangle.material = primitive.material >= 0 ? primitive.material + 1 : 0;
                 triangle.lightIndex = invalidLightIndex;
                 triangle.hasVertexNormals = normals != nullptr;
+                triangle.hasVertexTangents = tangents != nullptr;
                 triangle.hasTexcoords = texcoords != nullptr;
                 triangle.hasTexcoords1 = texcoords1 != nullptr;
                 if (normals != nullptr) {
                     triangle.n0 = readVec3(model, *normals, i0);
                     triangle.n1 = readVec3(model, *normals, i1);
                     triangle.n2 = readVec3(model, *normals, i2);
+                }
+                if (tangents != nullptr) {
+                    readTangent(model, *tangents, i0, triangle.vertexTangent0, triangle.vertexTangentSign0);
+                    readTangent(model, *tangents, i1, triangle.vertexTangent1, triangle.vertexTangentSign1);
+                    readTangent(model, *tangents, i2, triangle.vertexTangent2, triangle.vertexTangentSign2);
                 }
                 if (texcoords != nullptr) {
                     triangle.uv0 = readVec2(model, *texcoords, i0);

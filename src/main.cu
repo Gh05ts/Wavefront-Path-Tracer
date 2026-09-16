@@ -63,18 +63,25 @@ int main() {
 
     constexpr bool useGltfScene = true;
     constexpr bool useCornellScene = true;
+    constexpr bool useIntersectionDebug = false;
+    constexpr bool useShadingNormalDebug = false;
     Camera camera = useCornellScene && !useGltfScene ? createCornellCamera(width, height) : createDemoCamera(width, height);
     constexpr bool useObjScene = true;
     constexpr char sceneObjectFilename[] = "../assets/deer-obj.obj";
     constexpr char gltfFilename[] = "../assets/sponza/Sponza.gltf";
-    constexpr bool useHdrEnvironment = true;
-    constexpr char hdrEnvironmentFilename[] = "../assets/sponza/spruit_sunrise_4k.hdr";
-    constexpr float hdrEnvironmentIntensity = 1.0f;
+    constexpr float gltfSceneScale = 1.0f;
+    constexpr bool addSponzaTopLight = true;
+    constexpr bool ignoreSponzaLightOcclusion = false;
+    constexpr bool useNormalMaps = true;
+    constexpr float normalMapMinimumCosine = 0.0f;
     constexpr float sceneObjectScale = 0.1f;
     const Vec3 sceneObjectTranslation(0.181f, -0.906f, -0.2f);
-    DeviceScene deviceScene = useGltfScene ? createGltfScene(gltfFilename, useHdrEnvironment ? hdrEnvironmentFilename : nullptr, hdrEnvironmentIntensity) :
+    DeviceScene deviceScene = useGltfScene ? createGltfScene(gltfFilename, gltfSceneScale, addSponzaTopLight) :
         (useCornellScene ? createCornellScene(sceneObjectFilename, sceneObjectScale, sceneObjectTranslation) :
         (useObjScene ? createObjScene(sceneObjectFilename) : createDemoScene()));
+    deviceScene.scene.ignoreDirectLightOcclusion = useGltfScene && ignoreSponzaLightOcclusion;
+    deviceScene.scene.useNormalMaps = useNormalMaps;
+    deviceScene.scene.normalMapMinimumCosine = normalMapMinimumCosine;
 
     // --------------------------------------------------------
     // Path states
@@ -142,9 +149,9 @@ int main() {
     // Trace samples and path bounces
     // --------------------------------------------------------
 
-    constexpr uint32_t maxDepth = 16;
-    constexpr uint32_t russianRouletteStartDepth = 16;
-    constexpr uint32_t samplesPerPixel = 512;
+    constexpr uint32_t maxDepth = 32;
+    constexpr uint32_t russianRouletteStartDepth = 12;
+    constexpr uint32_t samplesPerPixel = useIntersectionDebug || useShadingNormalDebug ? 1 : 256;
     constexpr bool resumeFromCheckpoint = false;
     constexpr char checkpointFilename[] = "render.checkpoint";
     constexpr uint32_t checkpointProgressPercent = 25;
@@ -187,7 +194,7 @@ int main() {
         CUDA_CHECK(cudaMemsetAsync(nextRays.count, 0, sizeof(uint32_t), traceStream));
 
         intersectScene<<<blockCount, blockSize, 0, traceStream>>>(currentRayQueue,  deviceIntersectionResults,  deviceScene.scene);
-        shadePaths<<<blockCount, blockSize, 0, traceStream>>>(currentRayQueue,  deviceIntersectionResults,  nextRays,  devicePathStates,  deviceScene.scene,  maxDepth,  russianRouletteStartDepth,  renderSession.deviceFramebuffer);
+        shadePaths<<<blockCount, blockSize, 0, traceStream>>>(currentRayQueue,  deviceIntersectionResults,  nextRays,  devicePathStates,  deviceScene.scene,  maxDepth,  russianRouletteStartDepth,  useIntersectionDebug,  useShadingNormalDebug,  renderSession.deviceFramebuffer);
 
         std::swap(currentRayQueue, nextRays);
     }
