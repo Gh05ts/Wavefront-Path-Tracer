@@ -1,0 +1,8 @@
+{
+  "name": "demo",
+  "preset": "demo",
+  "normal_maps": {
+    "enabled": true,
+    "minimum_cosine": 0.0
+  }
+}

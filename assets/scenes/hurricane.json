@@ -1,0 +1,22 @@
+{
+  "name": "hurricane",
+  "preset": "hurricane",
+  "object": {
+    "source": "gltf",
+    "file": "../GlassHurricaneCandleHolder.glb",
+    "scale": 5.0,
+    "translation": [0.0, -0.82, 0.0],
+    "dielectric": false
+  },
+  "room": {
+    "neutral": true,
+    "remove_backdrop": false
+  },
+  "lighting": {
+    "profile": "standard"
+  },
+  "normal_maps": {
+    "enabled": true,
+    "minimum_cosine": 0.0
+  }
+}

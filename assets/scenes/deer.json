@@ -1,0 +1,16 @@
+{
+  "name": "deer",
+  "preset": "deer",
+  "object": {
+    "source": "obj",
+    "file": "../deer-obj.obj",
+    "scale": 8.0,
+    "translation": [0.13, -0.764, 0.5],
+    "dielectric": false
+  },
+  "acceleration": "tlas_blas_bvh2",
+  "normal_maps": {
+    "enabled": true,
+    "minimum_cosine": 0.0
+  }
+}

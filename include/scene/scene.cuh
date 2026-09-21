@@ -50,6 +50,40 @@ inline InstanceTransform makeScaledTransform(const Vec3& translation, float scal
         translation};
 }
 
+inline Vec3 rotateVector(const Vec3& vector, const Vec3& axis, float angleRadians) {
+    Vec3 unitAxis = normalize(axis);
+    float cosine = cosf(angleRadians);
+    float sine = sinf(angleRadians);
+    return vector * cosine + cross(unitAxis, vector) * sine + unitAxis * (dot(unitAxis, vector) * (1.0f - cosine));
+}
+
+inline Vec3 transformBasis(const Vec3& basisX, const Vec3& basisY, const Vec3& basisZ, const Vec3& vector) {
+    return basisX * vector.x + basisY * vector.y + basisZ * vector.z;
+}
+
+inline void rotateTransform(InstanceTransform& transform, const Vec3& axis, float degrees) {
+    constexpr float degreesToRadians = 3.14159265359f / 180.0f;
+    float angle = degrees * degreesToRadians;
+    Vec3 oldWorldToLocalX = transform.worldToLocalX;
+    Vec3 oldWorldToLocalY = transform.worldToLocalY;
+    Vec3 oldWorldToLocalZ = transform.worldToLocalZ;
+
+    transform.localToWorldX = rotateVector(transform.localToWorldX, axis, angle);
+    transform.localToWorldY = rotateVector(transform.localToWorldY, axis, angle);
+    transform.localToWorldZ = rotateVector(transform.localToWorldZ, axis, angle);
+
+    Vec3 inverseRotationX = rotateVector(Vec3(1.0f, 0.0f, 0.0f), axis, -angle);
+    Vec3 inverseRotationY = rotateVector(Vec3(0.0f, 1.0f, 0.0f), axis, -angle);
+    Vec3 inverseRotationZ = rotateVector(Vec3(0.0f, 0.0f, 1.0f), axis, -angle);
+    transform.worldToLocalX = transformBasis(oldWorldToLocalX, oldWorldToLocalY, oldWorldToLocalZ, inverseRotationX);
+    transform.worldToLocalY = transformBasis(oldWorldToLocalX, oldWorldToLocalY, oldWorldToLocalZ, inverseRotationY);
+    transform.worldToLocalZ = transformBasis(oldWorldToLocalX, oldWorldToLocalY, oldWorldToLocalZ, inverseRotationZ);
+}
+
+inline void rotateY180(InstanceTransform& transform) {
+    rotateTransform(transform, Vec3(0.0f, 1.0f, 0.0f), 180.0f);
+}
+
 struct MeshInstance {
     uint32_t blasIndex;
     uint32_t lightOffset;
@@ -127,12 +161,48 @@ struct DeviceScene {
     std::vector<cudaTextureObject_t> textureObjects;
 };
 
+enum class CornellObjectSource {
+    Obj,
+    Gltf,
+    ProceduralPrism
+};
+
+enum class CornellLightProfile {
+    Standard,
+    Prism,
+    Crystal
+};
+
+struct CornellSceneOptions {
+    const char* filename = nullptr;
+    CornellObjectSource objectSource = CornellObjectSource::Obj;
+    float objectScale = 1.0f;
+    Vec3 objectTranslation = Vec3(0.0f, 0.0f, 0.0f);
+    bool neutralRoom = false;
+    bool removeBackdrop = false;
+    bool convertObjectMaterialsToDielectric = false;
+    int32_t objectMaterialOverride = -1;
+    CornellLightProfile lightProfile = CornellLightProfile::Standard;
+};
+
+enum class ObjAccelerationPolicy {
+    TlasBlasBvh2,
+    NexusBvh2,
+    NexusBvh8,
+    MedianBvh,
+    SpatialSplitBvh
+};
+
+struct ObjSceneOptions {
+    const char* filename = nullptr;
+    float objectScale = 8.0f;
+    Vec3 objectTranslation = Vec3(0.13f, -0.764f, 0.5f);
+    ObjAccelerationPolicy acceleration = ObjAccelerationPolicy::TlasBlasBvh2;
+};
+
 DeviceScene createDemoScene();
-DeviceScene createObjScene(const char* filename);
-DeviceScene createCornellScene(const char* filename, float objectScale, const Vec3& objectTranslation);
+DeviceScene createObjScene(const ObjSceneOptions& options);
+DeviceScene createCornellScene(const CornellSceneOptions& options);
 DeviceScene createGltfScene(const char* filename, float sceneScale, bool addTopLight);
-void buildTlasBlas(DeviceScene& deviceScene, std::vector<MeshAsset>& meshes, const std::vector<SceneInstance>& instances, const std::vector<Material>& materials);
-void addStaticTriangleLights(DeviceScene& deviceScene, std::vector<Triangle>& triangles, const std::vector<Material>& materials);
-void uploadTriangleLights(DeviceScene& deviceScene);
 
 void destroyDeviceScene(DeviceScene& deviceScene);

@@ -34,6 +34,7 @@ struct Material {
 
     float roughness;
     float ior;
+    float dispersion = 0.0f;
     float metallic = 0.0f;
     float normalScale = 1.0f;
     float alphaCutoff = 0.5f;

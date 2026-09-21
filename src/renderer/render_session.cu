@@ -31,6 +31,10 @@ void resetRenderSession(RenderSession& session, cudaStream_t stream) {
     checkCuda(cudaMemsetAsync(session.deviceSampleIndex, 0, sizeof(uint32_t), stream));
 }
 
+void setRenderSessionSampleIndex(RenderSession& session, uint32_t sampleIndex, cudaStream_t stream) {
+    checkCuda(cudaMemcpyAsync(session.deviceSampleIndex, &sampleIndex, sizeof(sampleIndex), cudaMemcpyHostToDevice, stream));
+}
+
 uint32_t getRenderSessionSampleIndex(const RenderSession& session) {
     uint32_t sampleIndex = 0;
     checkCuda(cudaMemcpy(&sampleIndex, session.deviceSampleIndex, sizeof(uint32_t), cudaMemcpyDeviceToHost));

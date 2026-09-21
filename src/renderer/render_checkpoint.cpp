@@ -15,7 +15,7 @@
 namespace
 {
 constexpr char checkpointMagic[8] = {'P', 'T', 'C', 'H', 'K', 'P', 'T', '1'};
-constexpr uint32_t checkpointVersion = 1;
+constexpr uint32_t checkpointVersion = 2;
 
 struct CheckpointHeader {
     char magic[8];
@@ -23,6 +23,7 @@ struct CheckpointHeader {
     uint32_t width;
     uint32_t height;
     uint32_t sampleIndex;
+    uint64_t fingerprint;
 };
 
 void fail(const std::string& message) {
@@ -35,13 +36,14 @@ void checkCuda(cudaError_t error) {
         fail(std::string("CUDA error: ") + cudaGetErrorString(error));
 }
 
-void writeCheckpoint(const char* filename, const Vec3* pixels, uint32_t width, uint32_t height, uint32_t sampleIndex) {
+void writeCheckpoint(const char* filename, const Vec3* pixels, uint32_t width, uint32_t height, uint32_t sampleIndex, uint64_t fingerprint) {
     CheckpointHeader header{};
     std::memcpy(header.magic, checkpointMagic, sizeof(checkpointMagic));
     header.version = checkpointVersion;
     header.width = width;
     header.height = height;
     header.sampleIndex = sampleIndex;
+    header.fingerprint = fingerprint;
 
     std::string temporaryFilename = std::string(filename) + ".tmp";
     std::ofstream output(temporaryFilename, std::ios::binary | std::ios::trunc);
@@ -74,11 +76,12 @@ struct AsyncCheckpointWriter {
     std::string filename;
     std::mutex writeMutex;
     uint32_t latestWrittenSample = 0;
+    uint64_t fingerprint = 0;
     std::unique_ptr<Slot[]> slots;
     uint32_t slotCount;
 };
 
-AsyncCheckpointWriter* createAsyncCheckpointWriter(uint32_t width, uint32_t height, const char* filename, uint32_t bufferCount) {
+AsyncCheckpointWriter* createAsyncCheckpointWriter(uint32_t width, uint32_t height, const char* filename, uint32_t bufferCount, uint64_t fingerprint) {
     static_assert(sizeof(Vec3) == sizeof(float) * 3, "Checkpoint stores Vec3 as three floats");
 
     if (bufferCount == 0)
@@ -88,6 +91,7 @@ AsyncCheckpointWriter* createAsyncCheckpointWriter(uint32_t width, uint32_t heig
     writer->width = width;
     writer->height = height;
     writer->filename = filename;
+    writer->fingerprint = fingerprint;
     writer->slots = std::make_unique<AsyncCheckpointWriter::Slot[]>(bufferCount);
     writer->slotCount = bufferCount;
 
@@ -120,7 +124,7 @@ bool enqueueRenderSessionCheckpoint(AsyncCheckpointWriter& writer, const RenderS
             {
                 std::lock_guard<std::mutex> lock(writer.writeMutex);
                 if (sampleIndex >= writer.latestWrittenSample) {
-                    writeCheckpoint(writer.filename.c_str(), slot.pixels, writer.width, writer.height, sampleIndex);
+                    writeCheckpoint(writer.filename.c_str(), slot.pixels, writer.width, writer.height, sampleIndex, writer.fingerprint);
                     writer.latestWrittenSample = sampleIndex;
                 }
             }
@@ -156,7 +160,7 @@ void destroyAsyncCheckpointWriter(AsyncCheckpointWriter* writer) {
     delete writer;
 }
 
-uint32_t loadRenderSessionCheckpoint(RenderSession& session, const char* filename) {
+uint32_t loadRenderSessionCheckpoint(RenderSession& session, const char* filename, uint64_t expectedFingerprint) {
     std::ifstream input(filename, std::ios::binary);
 
     if (!input)
@@ -173,6 +177,9 @@ uint32_t loadRenderSessionCheckpoint(RenderSession& session, const char* filenam
 
     if (header.width != session.width || header.height != session.height)
         fail(std::string("Checkpoint resolution does not match the current render: ") + filename);
+
+    if (header.fingerprint != expectedFingerprint)
+        fail(std::string("Checkpoint scene/config fingerprint does not match the current render: ") + filename);
 
     uint32_t pixelCount = session.width * session.height;
     std::vector<Vec3> pixels(pixelCount);

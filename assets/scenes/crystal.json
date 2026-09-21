@@ -1,0 +1,23 @@
+{
+  "name": "crystal",
+  "preset": "crystal",
+  "object": {
+    "source": "obj",
+    "file": "../crystals_blue.obj",
+    "scale": 0.35,
+    "translation": [0.0, -0.18, 0.0],
+    "dielectric": true
+  },
+  "room": {
+    "neutral": true,
+    "remove_backdrop": false
+  },
+  "lighting": {
+    "profile": "crystal"
+  },
+  "normal_maps": {
+    "enabled": true,
+    "minimum_cosine": 0.0
+  },
+  "acceleration": "tlas_blas_bvh2"
+}
