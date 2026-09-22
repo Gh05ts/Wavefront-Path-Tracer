@@ -64,6 +64,7 @@ target_link_libraries(pathtracer
     PRIVATE
         NXB::NexusBVH
         CUDA::cudart
+        stdc++fs
 )
 
 set_target_properties(pathtracer PROPERTIES
