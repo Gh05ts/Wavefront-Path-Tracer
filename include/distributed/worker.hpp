@@ -70,7 +70,8 @@ public:
         TaskAssignmentMessage& assignment,
         bool& hasTask,
         uint32_t* retryAfterMs = nullptr,
-        std::string* error = nullptr);
+        std::string* error = nullptr,
+        bool* jobComplete = nullptr);
     bool submitResult(const DistributedTaskResult& result, ResultAckMessage& acknowledgment, std::string* error = nullptr);
     bool heartbeat(HeartbeatAckMessage& acknowledgment, std::string* error = nullptr);
     bool synchronizeAssets(

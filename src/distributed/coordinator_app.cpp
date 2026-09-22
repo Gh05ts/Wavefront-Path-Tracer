@@ -10,6 +10,7 @@
 #include "renderer/render_fingerprint.hpp"
 
 #include <chrono>
+#include <atomic>
 #include <iostream>
 #include <thread>
 #include <utility>
@@ -115,11 +116,12 @@ int runDistributedCoordinator(const RenderConfig& config, const SceneConfig& sce
 
     auto nextCheckpoint = std::chrono::steady_clock::now();
     bool finalImageWritten = false;
+    std::atomic<uint32_t> activeSessions{0};
     const DistributedAssetCatalog* assetCatalogPtr = config.pushAssets ? &assetCatalog : nullptr;
 
     while (true) {
         const auto now = std::chrono::steady_clock::now();
-        if (now >= nextCheckpoint) {
+        if (!finalImageWritten && now >= nextCheckpoint) {
             if (!writeDistributedSnapshot(config, coordinator, ++checkpointSequence))
                 return 1;
             std::cout << "Checkpointed " << coordinator.completedTaskCount() << '/'
@@ -139,6 +141,17 @@ int runDistributedCoordinator(const RenderConfig& config, const SceneConfig& sce
             std::cout << "Distributed render complete\n";
         }
 
+        if (finalImageWritten) {
+            // Existing workers receive the completion response on their next
+            // request and then close their sessions. Do not accept new
+            // workers or touch coordinator state after the final image; wait
+            // until detached session threads have released their references.
+            if (activeSessions.load() == 0)
+                return 0;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+
         std::string acceptError;
         auto connection = listener->accept(&acceptError, 250);
         if (!connection) {
@@ -149,7 +162,8 @@ int runDistributedCoordinator(const RenderConfig& config, const SceneConfig& sce
         }
 
         TcpConnection workerConnection = std::move(*connection);
-        std::thread([&coordinator, leaseDurationMs, assetCatalogPtr, connection = std::move(workerConnection)]() mutable {
+        activeSessions.fetch_add(1);
+        std::thread([&coordinator, &activeSessions, leaseDurationMs, assetCatalogPtr, connection = std::move(workerConnection)]() mutable {
             CoordinatorWorkerSession session(
                 coordinator,
                 CoordinatorSessionConfig{leaseDurationMs, 1000, assetCatalogPtr});
@@ -157,6 +171,7 @@ int runDistributedCoordinator(const RenderConfig& config, const SceneConfig& sce
             session.run(connection, &sessionError);
             if (!sessionError.empty())
                 std::cerr << "Worker session ended: " << sessionError << '\n';
+            activeSessions.fetch_sub(1);
         }).detach();
     }
 }

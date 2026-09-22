@@ -80,12 +80,15 @@ int runDistributedWorker(const RenderConfig& config, const SceneConfig& scene) {
         while (client->valid()) {
             if (!hasTask) {
                 uint32_t retryAfterMs = 1000;
-                if (!client->requestTask(assignment, hasTask, &retryAfterMs, &error)) {
+                bool jobComplete = false;
+                if (!client->requestTask(assignment, hasTask, &retryAfterMs, &error, &jobComplete)) {
                     std::cerr << "Worker task request failed: " << error << '\n';
                     resultCode = 1;
                     break;
                 }
                 if (!hasTask) {
+                    if (jobComplete)
+                        break;
                     std::this_thread::sleep_for(std::chrono::milliseconds(retryAfterMs));
                     continue;
                 }

@@ -8,7 +8,7 @@
 #include "assets.hpp"
 #include "coordinator.hpp"
 
-constexpr uint32_t distributedProtocolVersion = 2;
+constexpr uint32_t distributedProtocolVersion = 3;
 constexpr uint32_t distributedMaxMessageBytes = 128u * 1024u * 1024u;
 constexpr uint32_t distributedAssetChunkBytes = 4u * 1024u * 1024u;
 
@@ -77,6 +77,7 @@ struct ResultAckMessage {
 
 struct NoTaskMessage {
     uint32_t retryAfterMs = 1000;
+    bool jobComplete = false;
 };
 
 struct HeartbeatMessage {

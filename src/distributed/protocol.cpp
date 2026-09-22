@@ -298,6 +298,7 @@ bool encodeDistributedMessage(const DistributedMessage& message, std::vector<uin
                 appendAssignment(writer, value.nextTask);
         } else if constexpr (std::is_same_v<Message, NoTaskMessage>) {
             writer.u32(value.retryAfterMs);
+            writer.u8(value.jobComplete ? 1 : 0);
         } else if constexpr (std::is_same_v<Message, HeartbeatMessage>) {
             writer.string(value.workerId);
         } else if constexpr (std::is_same_v<Message, HeartbeatAckMessage>) {
@@ -411,8 +412,10 @@ bool decodeDistributedMessage(const std::vector<uint8_t>& bytes, DistributedMess
     }
     case DistributedMessageType::NoTask: {
         NoTaskMessage value;
-        if (!reader.u32(value.retryAfterMs))
+        uint8_t jobComplete = 0;
+        if (!reader.u32(value.retryAfterMs) || !reader.u8(jobComplete) || jobComplete > 1)
             break;
+        value.jobComplete = jobComplete != 0;
         message = std::move(value);
         goto decoded;
     }

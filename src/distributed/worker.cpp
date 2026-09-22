@@ -99,7 +99,7 @@ CoordinatorSessionResponse CoordinatorWorkerSession::handleMessage(
             return CoordinatorSessionResponse{true, *assignment};
         return CoordinatorSessionResponse{
             true,
-            NoTaskMessage{config_.noTaskRetryAfterMs}};
+            NoTaskMessage{config_.noTaskRetryAfterMs, coordinator_.complete()}};
     }
 
     if (const auto* result = std::get_if<TaskResultMessage>(&message)) {
@@ -109,7 +109,7 @@ CoordinatorSessionResponse CoordinatorWorkerSession::handleMessage(
         ResultAckMessage acknowledgment;
         acknowledgment.taskId = result->result.taskId;
         acknowledgment.status = coordinator_.commitResult(result->result);
-        if (acknowledgment.status != DistributedCommitStatus::Rejected) {
+        if (acknowledgment.status != DistributedCommitStatus::Rejected && !coordinator_.complete()) {
             if (const auto assignment = nextAssignment(nowMs)) {
                 acknowledgment.hasNextTask = true;
                 acknowledgment.nextTask = *assignment;
@@ -334,7 +334,10 @@ bool DistributedWorkerClient::requestTask(
     TaskAssignmentMessage& assignment,
     bool& hasTask,
     uint32_t* retryAfterMs,
-    std::string* error) {
+    std::string* error,
+    bool* jobComplete) {
+    if (jobComplete != nullptr)
+        *jobComplete = false;
     if (!connection_.send(TaskRequestMessage{workerId_}, error))
         return false;
 
@@ -350,6 +353,8 @@ bool DistributedWorkerClient::requestTask(
         hasTask = false;
         if (retryAfterMs != nullptr)
             *retryAfterMs = noTask->retryAfterMs;
+        if (jobComplete != nullptr)
+            *jobComplete = noTask->jobComplete;
         return true;
     }
     if (const auto* failure = std::get_if<ErrorMessage>(&response)) {
