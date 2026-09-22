@@ -10,6 +10,7 @@ target_include_directories(tile_scheduler_tests
         ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
+target_link_libraries(tile_scheduler_tests PRIVATE CUDA::cudart stdc++fs)
 add_test(NAME tile_scheduler_tests COMMAND tile_scheduler_tests)
 
 add_executable(distributed_task_tests
@@ -22,6 +23,7 @@ target_include_directories(distributed_task_tests
         ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
+target_link_libraries(distributed_task_tests PRIVATE CUDA::cudart stdc++fs)
 add_test(NAME distributed_task_tests COMMAND distributed_task_tests)
 
 add_executable(distributed_coordinator_tests
@@ -36,6 +38,7 @@ target_include_directories(distributed_coordinator_tests
         ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
+target_link_libraries(distributed_coordinator_tests PRIVATE CUDA::cudart stdc++fs)
 add_test(NAME distributed_coordinator_tests COMMAND distributed_coordinator_tests)
 
 add_executable(distributed_transport_tests
@@ -56,6 +59,7 @@ target_include_directories(distributed_transport_tests
         ${CMAKE_CURRENT_SOURCE_DIR}/../extern/tinygltf
 )
 
+target_link_libraries(distributed_transport_tests PRIVATE Threads::Threads CUDA::cudart stdc++fs)
 target_link_libraries(distributed_transport_tests PRIVATE Threads::Threads)
 add_test(NAME distributed_transport_tests COMMAND distributed_transport_tests)
 
@@ -77,6 +81,7 @@ target_include_directories(distributed_worker_tests
         ${CMAKE_CURRENT_SOURCE_DIR}/../extern/tinygltf
 )
 
+target_link_libraries(distributed_worker_tests PRIVATE CUDA::cudart stdc++fs)
 add_test(NAME distributed_worker_tests COMMAND distributed_worker_tests)
 
 add_executable(config_tests
@@ -93,6 +98,7 @@ target_include_directories(config_tests
         ${CMAKE_CURRENT_SOURCE_DIR}/../extern/tinygltf
 )
 
+target_link_libraries(config_tests PRIVATE CUDA::cudart stdc++fs)
 add_test(NAME config_tests COMMAND config_tests)
 
 add_executable(checkpoint_tests
@@ -108,6 +114,7 @@ target_include_directories(checkpoint_tests
 
 target_link_libraries(checkpoint_tests PRIVATE Threads::Threads)
 set_target_properties(checkpoint_tests PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+target_link_libraries(checkpoint_tests PRIVATE Threads::Threads CUDA::cudart stdc++fs)
 add_test(NAME checkpoint_tests COMMAND checkpoint_tests)
 
 add_executable(queue_compaction_tests
@@ -119,4 +126,5 @@ target_include_directories(queue_compaction_tests
         ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
+target_link_libraries(queue_compaction_tests PRIVATE CUDA::cudart stdc++fs)
 add_test(NAME queue_compaction_tests COMMAND queue_compaction_tests)
