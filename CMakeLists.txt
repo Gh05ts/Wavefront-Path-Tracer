@@ -11,6 +11,8 @@ set(CMAKE_CUDA_STANDARD 17)
 
 set(CMAKE_CUDA_ARCHITECTURES 86)
 
+find_package(CUDAToolkit REQUIRED)
+
 set(NEXUSBVH_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(NEXUSBVH_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory(extern/NexusBVH)
@@ -59,6 +61,7 @@ target_include_directories(pathtracer
 target_link_libraries(pathtracer
     PRIVATE
         NXB::NexusBVH
+        CUDA::cudart
 )
 
 set_target_properties(pathtracer PROPERTIES

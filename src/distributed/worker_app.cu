@@ -35,7 +35,7 @@ int runDistributedWorker(const RenderConfig& config, const SceneConfig& scene) {
     SceneConfig workerScene = scene;
     // With asset transfer enabled, the worker may not have the primary asset
     // yet, so defer fingerprint calculation until the cache is populated.
-    const uint64_t fingerprint = config.pushAssets ? 0 : computeRenderFingerprint(config, workerScene);
+    uint64_t fingerprint = config.pushAssets ? 0 : computeRenderFingerprint(config, workerScene);
     std::string error;
     auto client = DistributedWorkerClient::connectToCoordinator(
         config.coordinatorHost,
@@ -56,7 +56,8 @@ int runDistributedWorker(const RenderConfig& config, const SceneConfig& scene) {
             client->close();
             return 1;
         }
-        if (computeRenderFingerprint(config, workerScene) != client->coordinatorJobFingerprint()) {
+        fingerprint = computeRenderFingerprint(config, workerScene);
+        if (fingerprint != client->coordinatorJobFingerprint()) {
             std::cerr << "Transferred assets produced a different render fingerprint\n";
             client->close();
             return 1;
