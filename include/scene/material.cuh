@@ -5,6 +5,7 @@
 #include "../core/vec3.cuh"
 
 constexpr uint32_t invalidTextureIndex = 0xffffffffu;
+constexpr uint32_t invalidMaterialIndex = 0xffffffffu;
 
 struct Texture {
     cudaTextureObject_t object;

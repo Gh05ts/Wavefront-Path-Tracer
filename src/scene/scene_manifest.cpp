@@ -23,6 +23,7 @@ const char* presetName(ScenePreset preset) {
     case ScenePreset::Prism: return "prism";
     case ScenePreset::Crystal: return "crystal";
     case ScenePreset::Deer: return "deer";
+    case ScenePreset::RtWeek: return "rtweek";
     case ScenePreset::Demo: return "demo";
     }
     return "unknown";

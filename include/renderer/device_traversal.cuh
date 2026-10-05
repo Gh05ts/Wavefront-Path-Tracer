@@ -216,7 +216,7 @@ bool intersectNexusBvh8ChildAabb(const Ray& ray, const Vec3& inverseDirection, c
 }
 
 __device__
-void intersectNexusBvh2(const Ray& ray, const Triangle* triangles, const NXB::BVH2::DeviceView& bvh, Scene scene, float& closestT, int& closestMaterial, Vec3& closestGeometricNormal, Vec3& closestNormal, Vec2& closestUv, Vec2& closestUv1, Vec3& closestTangent, Vec3& closestBitangent, Vec3& closestTangent1, Vec3& closestBitangent1, uint32_t& closestLightIndex) {
+void intersectNexusBvh2(const Ray& ray, const Triangle* triangles, const NXB::BVH2::DeviceView& bvh, Scene scene, float& closestT, int& closestMaterial, Vec3& closestGeometricNormal, Vec3& closestNormal, Vec2& closestUv, Vec2& closestUv1, Vec3& closestTangent, Vec3& closestBitangent, Vec3& closestTangent1, Vec3& closestBitangent1, uint32_t& closestLightIndex, uint32_t materialOverride = invalidMaterialIndex) {
     constexpr uint32_t maxBvhStackSize = 64;
     uint32_t stack[maxBvhStackSize];
     uint32_t stackSize = 1;
@@ -238,12 +238,13 @@ void intersectNexusBvh2(const Ray& ray, const Triangle* triangles, const NXB::BV
             if (intersectTriangle(ray, triangle, t, u, v) && t < closestT) {
                 Vec2 uv = getTriangleUv(triangle, u, v, false);
                 Vec2 uv1 = getTriangleUv(triangle, u, v, true);
+                uint32_t materialIndex = materialOverride == invalidMaterialIndex ? triangle.material : materialOverride;
 
-                if (scene.materials[triangle.material].alphaMasked && getMaterialOpacity(scene.materials[triangle.material], uv, uv1, scene) < scene.materials[triangle.material].alphaCutoff)
+                if (scene.materials[materialIndex].alphaMasked && getMaterialOpacity(scene.materials[materialIndex], uv, uv1, scene) < scene.materials[materialIndex].alphaCutoff)
                     continue;
 
                 closestT = t;
-                closestMaterial = static_cast<int>(triangle.material);
+                closestMaterial = static_cast<int>(materialIndex);
                 closestGeometricNormal = getTriangleGeometricNormal(triangle, ray);
                 closestNormal = getTriangleNormal(triangle, ray, u, v);
                 closestUv = uv;
@@ -267,7 +268,7 @@ void intersectNexusBvh2(const Ray& ray, const Triangle* triangles, const NXB::BV
                 }
                 closestTangent1 = triangle.tangent1;
                 closestBitangent1 = triangle.bitangent1;
-                closestLightIndex = triangle.lightIndex;
+                closestLightIndex = materialOverride == invalidMaterialIndex ? triangle.lightIndex : invalidLightIndex;
             }
         } else {
             float leftNearT;
@@ -336,7 +337,7 @@ bool isOccluded(const Ray& ray, float maximumDistance, Scene scene) {
                 Vec3 closestTangent1;
                 Vec3 closestBitangent1;
                 uint32_t closestLightIndex;
-                intersectNexusBvh2(localRay, blas.triangles, blas.bvh, scene, closestT, closestMaterial, closestGeometricNormal, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
+                intersectNexusBvh2(localRay, blas.triangles, blas.bvh, scene, closestT, closestMaterial, closestGeometricNormal, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex, instance.materialOverride);
 
                 if (closestMaterial >= 0)
                     return true;
@@ -594,7 +595,7 @@ __device__ __forceinline__ TraceResult traceRay(const Ray& ray, Scene scene) {
                 Vec3 instanceTangent1;
                 Vec3 instanceBitangent1;
                 uint32_t instanceLightIndex = invalidLightIndex;
-                intersectNexusBvh2(localRay, blas.triangles, blas.bvh, scene, instanceClosestT, instanceMaterial, instanceGeometricNormal, instanceNormal, instanceUv, instanceUv1, instanceTangent, instanceBitangent, instanceTangent1, instanceBitangent1, instanceLightIndex);
+                intersectNexusBvh2(localRay, blas.triangles, blas.bvh, scene, instanceClosestT, instanceMaterial, instanceGeometricNormal, instanceNormal, instanceUv, instanceUv1, instanceTangent, instanceBitangent, instanceTangent1, instanceBitangent1, instanceLightIndex, instance.materialOverride);
 
                 if (instanceMaterial >= 0) {
                     closestT = instanceClosestT;

@@ -41,6 +41,20 @@ target_include_directories(distributed_coordinator_tests
 target_link_libraries(distributed_coordinator_tests PRIVATE CUDA::cudart stdc++fs)
 add_test(NAME distributed_coordinator_tests COMMAND distributed_coordinator_tests)
 
+add_executable(distributed_checkpoint_writer_tests
+    distributed_checkpoint_writer_tests.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/distributed/checkpoint.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/distributed/checkpoint_writer.cpp
+)
+
+target_include_directories(distributed_checkpoint_writer_tests
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+
+target_link_libraries(distributed_checkpoint_writer_tests PRIVATE Threads::Threads)
+add_test(NAME distributed_checkpoint_writer_tests COMMAND distributed_checkpoint_writer_tests)
+
 add_executable(distributed_transport_tests
     distributed_transport_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/distributed/assets.cpp

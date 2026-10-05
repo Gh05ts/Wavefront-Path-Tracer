@@ -71,7 +71,10 @@ CoordinatorSessionResponse CoordinatorWorkerSession::handleMessage(
                 false,
                 WorkerHelloAcceptedMessage{false, "worker ID cannot be empty"}};
         const bool deferredAssetFingerprint = hello->jobFingerprint == 0 && config_.assetCatalog != nullptr;
-        if (hello->jobFingerprint != coordinator_.job().jobFingerprint && !deferredAssetFingerprint)
+        const bool pushedConfiguration = config_.acceptWorkerConfiguration &&
+            config_.workerConfiguration != nullptr;
+        if (hello->jobFingerprint != coordinator_.job().jobFingerprint &&
+            !deferredAssetFingerprint && !pushedConfiguration)
             return CoordinatorSessionResponse{
                 false,
                 WorkerHelloAcceptedMessage{false, "worker job fingerprint does not match"}};
@@ -85,6 +88,10 @@ CoordinatorSessionResponse CoordinatorWorkerSession::handleMessage(
             accepted.assets.reserve(config_.assetCatalog->files.size());
             for (const DistributedAssetFile& file : config_.assetCatalog->files)
                 accepted.assets.push_back(DistributedAssetDescriptor{file.relativePath, file.byteSize, file.checksum});
+        }
+        if (pushedConfiguration) {
+            accepted.hasConfiguration = true;
+            accepted.configuration = *config_.workerConfiguration;
         }
         return CoordinatorSessionResponse{
             true,
@@ -206,6 +213,8 @@ std::optional<TaskAssignmentMessage> CoordinatorWorkerSession::nextAssignment(ui
     const auto lease = coordinator_.leaseNext(workerId_, nowMs, config_.leaseDurationMs);
     if (!lease)
         return std::nullopt;
+    if (config_.onTaskAssigned)
+        config_.onTaskAssigned();
     return TaskAssignmentMessage{lease->task, lease->expiresAtMs};
 }
 
@@ -237,9 +246,13 @@ std::optional<DistributedWorkerClient> DistributedWorkerClient::connectToCoordin
             *error = accepted == nullptr ? "coordinator returned an unexpected registration response" : accepted->message;
         return std::nullopt;
     }
+    std::optional<DistributedWorkerConfiguration> coordinatorConfiguration;
+    if (accepted->hasConfiguration)
+        coordinatorConfiguration = accepted->configuration;
     return DistributedWorkerClient(
         std::move(*connection), workerId, accepted->jobFingerprint,
-        accepted->primaryAssetPath, accepted->assets);
+        accepted->primaryAssetPath, accepted->assets,
+        std::move(coordinatorConfiguration));
 }
 
 bool DistributedWorkerClient::synchronizeAssets(

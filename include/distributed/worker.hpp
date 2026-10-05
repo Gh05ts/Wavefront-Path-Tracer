@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -13,6 +14,9 @@ struct CoordinatorSessionConfig {
     uint64_t leaseDurationMs = 30000;
     uint32_t noTaskRetryAfterMs = 1000;
     const DistributedAssetCatalog* assetCatalog = nullptr;
+    std::function<void()> onTaskAssigned;
+    const DistributedWorkerConfiguration* workerConfiguration = nullptr;
+    bool acceptWorkerConfiguration = false;
 };
 
 struct CoordinatorSessionResponse {
@@ -79,6 +83,8 @@ public:
         const std::string& cacheDirectory,
         std::string* error = nullptr);
     uint64_t coordinatorJobFingerprint() const { return coordinatorJobFingerprint_; }
+    bool hasCoordinatorConfiguration() const { return coordinatorConfiguration_.has_value(); }
+    const DistributedWorkerConfiguration& coordinatorConfiguration() const { return *coordinatorConfiguration_; }
     bool valid() const { return connection_.valid(); }
     void close() { connection_.close(); }
 
@@ -88,14 +94,17 @@ private:
         std::string workerId,
         uint64_t coordinatorJobFingerprint,
         std::string primaryAssetPath,
-        std::vector<DistributedAssetDescriptor> assets)
+        std::vector<DistributedAssetDescriptor> assets,
+        std::optional<DistributedWorkerConfiguration> coordinatorConfiguration)
         : connection_(std::move(connection)), workerId_(std::move(workerId)),
           coordinatorJobFingerprint_(coordinatorJobFingerprint),
-          primaryAssetPath_(std::move(primaryAssetPath)), assets_(std::move(assets)) {}
+          primaryAssetPath_(std::move(primaryAssetPath)), assets_(std::move(assets)),
+          coordinatorConfiguration_(std::move(coordinatorConfiguration)) {}
 
     TcpConnection connection_;
     std::string workerId_;
     uint64_t coordinatorJobFingerprint_ = 0;
+    std::optional<DistributedWorkerConfiguration> coordinatorConfiguration_;
     std::string primaryAssetPath_;
     std::vector<DistributedAssetDescriptor> assets_;
 };

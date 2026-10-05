@@ -3,6 +3,7 @@
 #include "distributed/checkpoint.hpp"
 #include "distributed/assets.hpp"
 #include "distributed/coordinator.hpp"
+#include "distributed/checkpoint_writer.hpp"
 #include "distributed/task.hpp"
 #include "distributed/transport.hpp"
 #include "distributed/worker.hpp"
@@ -36,16 +37,21 @@ void writeDistributedImage(
     std::cout << "Wrote " << filename << '\n';
 }
 
-bool writeDistributedSnapshot(
-    const RenderConfig& config,
+bool queueDistributedSnapshot(
+    DistributedCheckpointWriter& writer,
     const DistributedCoordinator& coordinator,
-    uint64_t sequence) {
+    uint64_t sequence,
+    size_t& completedTasks) {
+    DistributedCheckpoint checkpoint = coordinator.snapshot(sequence);
+    completedTasks = 0;
+    for (uint8_t completed : checkpoint.completedTasks) {
+        if (completed != 0)
+            ++completedTasks;
+    }
+
     std::string error;
-    if (!writeDistributedCheckpoint(
-            config.distributedCheckpointFilename,
-            coordinator.snapshot(sequence),
-            &error)) {
-        std::cerr << "Could not write distributed checkpoint: " << error << '\n';
+    if (!writer.enqueue(std::move(checkpoint), &error)) {
+        std::cerr << "Could not queue distributed checkpoint: " << error << '\n';
         return false;
     }
     return true;
@@ -117,26 +123,57 @@ int runDistributedCoordinator(const RenderConfig& config, const SceneConfig& sce
     auto nextCheckpoint = std::chrono::steady_clock::now();
     bool finalImageWritten = false;
     std::atomic<uint32_t> activeSessions{0};
+    std::atomic<int64_t> firstTaskStartMilliseconds{0};
     const DistributedAssetCatalog* assetCatalogPtr = config.pushAssets ? &assetCatalog : nullptr;
+    const DistributedWorkerConfiguration workerConfiguration =
+        makeDistributedWorkerConfiguration(config, scene);
+    const DistributedWorkerConfiguration* workerConfigurationPtr =
+        config.pushConfigurationToWorkers ? &workerConfiguration : nullptr;
+    DistributedCheckpointWriter checkpointWriter(config.distributedCheckpointFilename);
 
     while (true) {
         const auto now = std::chrono::steady_clock::now();
+        std::string checkpointError;
+        if (checkpointWriter.failed(&checkpointError)) {
+            std::cerr << "Distributed checkpoint writer failed: " << checkpointError << '\n';
+            return 1;
+        }
+
         if (!finalImageWritten && now >= nextCheckpoint) {
-            if (!writeDistributedSnapshot(config, coordinator, ++checkpointSequence))
+            size_t checkpointCompletedTasks = 0;
+            if (!queueDistributedSnapshot(
+                    checkpointWriter,
+                    coordinator,
+                    ++checkpointSequence,
+                    checkpointCompletedTasks))
                 return 1;
-            std::cout << "Checkpointed " << coordinator.completedTaskCount() << '/'
-                      << coordinator.taskCount() << " distributed tasks\n";
+            std::cout << "Queued checkpoint " << checkpointSequence << ": "
+                      << checkpointCompletedTasks << '/' << coordinator.taskCount()
+                      << " distributed tasks\n";
             nextCheckpoint = now + std::chrono::seconds(config.distributedCheckpointIntervalSeconds);
         }
 
         if (!finalImageWritten && coordinator.complete()) {
+            if (!checkpointWriter.flush(&checkpointError)) {
+                std::cerr << "Could not flush distributed checkpoint: "
+                          << checkpointError << '\n';
+                return 1;
+            }
+            checkpointWriter.shutdown();
+
             const DistributedCheckpoint checkpoint = coordinator.snapshot(++checkpointSequence);
-            std::string checkpointError;
             if (!writeDistributedCheckpoint(config.distributedCheckpointFilename, checkpoint, &checkpointError)) {
                 std::cerr << "Could not write final distributed checkpoint: " << checkpointError << '\n';
                 return 1;
             }
             writeDistributedImage(config.outputFilename, checkpoint);
+            const int64_t firstTaskStart = firstTaskStartMilliseconds.load();
+            if (firstTaskStart != 0) {
+                const int64_t endMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
+                std::cout << "Distributed trace time (first task to final image): "
+                          << (endMilliseconds - firstTaskStart) << " ms\n";
+            }
             finalImageWritten = true;
             std::cout << "Distributed render complete\n";
         }
@@ -163,10 +200,21 @@ int runDistributedCoordinator(const RenderConfig& config, const SceneConfig& sce
 
         TcpConnection workerConnection = std::move(*connection);
         activeSessions.fetch_add(1);
-        std::thread([&coordinator, &activeSessions, leaseDurationMs, assetCatalogPtr, connection = std::move(workerConnection)]() mutable {
+        std::thread([&coordinator, &activeSessions, &firstTaskStartMilliseconds, leaseDurationMs, assetCatalogPtr, workerConfigurationPtr, connection = std::move(workerConnection)]() mutable {
             CoordinatorWorkerSession session(
                 coordinator,
-                CoordinatorSessionConfig{leaseDurationMs, 1000, assetCatalogPtr});
+                CoordinatorSessionConfig{
+                    leaseDurationMs,
+                    1000,
+                    assetCatalogPtr,
+                    [&firstTaskStartMilliseconds] {
+                        int64_t nowMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch()).count();
+                        int64_t expected = 0;
+                        firstTaskStartMilliseconds.compare_exchange_strong(expected, nowMilliseconds);
+                    },
+                    workerConfigurationPtr,
+                    workerConfigurationPtr != nullptr});
             std::string sessionError;
             session.run(connection, &sessionError);
             if (!sessionError.empty())

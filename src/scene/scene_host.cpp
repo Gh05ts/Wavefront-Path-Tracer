@@ -52,6 +52,11 @@ Material makeMaterial(MaterialType type, const Vec3& albedo, const Vec3& emissio
     return material;
 }
 
+float nextSceneRandom(uint32_t& state) {
+    state = state * 1664525u + 1013904223u;
+    return static_cast<float>(state >> 8) * (1.0f / 16777216.0f);
+}
+
 void addStaticTriangleLights(HostScene& hostScene) {
     for (Triangle& triangle : hostScene.staticTriangles) {
         if (hostScene.materials[triangle.material].type != MaterialType::Emissive) {
@@ -154,6 +159,83 @@ HostScene assembleDemoScene() {
     };
     hostScene.materials[1].roughness = 0.08f;
     hostScene.materials[2].ior = 1.5f;
+    return hostScene;
+}
+
+HostScene assembleRtWeekScene(const char* filename) {
+    requireAssetFilename(filename, "RT week");
+    ObjMesh lucy = loadObjMesh(filename);
+
+    HostScene hostScene;
+    hostScene.materials = {
+        makeMaterial(MaterialType::Diffuse, Vec3(0.50f, 0.50f, 0.50f)), // ground
+        makeMaterial(MaterialType::Diffuse, Vec3(0.72f, 0.20f, 0.12f)),
+        makeMaterial(MaterialType::Diffuse, Vec3(0.16f, 0.35f, 0.72f)),
+        makeMaterial(MaterialType::Diffuse, Vec3(0.22f, 0.62f, 0.28f)),
+        makeMaterial(MaterialType::Metal, Vec3(0.82f, 0.84f, 0.88f)),
+        makeMaterial(MaterialType::Metal, Vec3(0.88f, 0.60f, 0.20f)),
+        makeMaterial(MaterialType::Dielectric, Vec3(1.0f, 1.0f, 1.0f)),
+        makeMaterial(MaterialType::Diffuse, Vec3(0.80f, 0.30f, 0.30f)), // Lucy diffuse
+        makeMaterial(MaterialType::Metal, Vec3(0.80f, 0.82f, 0.90f)),    // Lucy metal
+        makeMaterial(MaterialType::Dielectric, Vec3(1.0f, 1.0f, 1.0f))}; // Lucy glass
+
+    hostScene.materials[4].roughness = 0.08f;
+    hostScene.materials[5].roughness = 0.05f;
+    hostScene.materials[6].ior = 1.5f;
+    hostScene.materials[8].roughness = 0.05f;
+    hostScene.materials[9].ior = 1.5f;
+
+    // The large ground sphere and deterministic small-sphere field follow the
+    // Ray Tracing in One Weekend layout, while the fixed seed keeps this scene
+    // reproducible for wavefront-vs-baseline comparisons.
+    hostScene.spheres.push_back(Sphere{Vec3(0.0f, -1000.0f, 0.0f), 1000.0f, 0});
+    uint32_t randomState = 0x4d595df4u;
+    for (int x = -11; x < 11; ++x) {
+        for (int z = -11; z < 11; ++z) {
+            float chooseMaterial = nextSceneRandom(randomState);
+            Vec3 center(
+                static_cast<float>(x) + nextSceneRandom(randomState),
+                0.2f,
+                static_cast<float>(z) + nextSceneRandom(randomState));
+
+            uint32_t material;
+            if (chooseMaterial < 0.70f) {
+                const float colorChoice = nextSceneRandom(randomState);
+                material = colorChoice < 0.34f ? 1u : (colorChoice < 0.67f ? 2u : 3u);
+            } else if (chooseMaterial < 0.85f) {
+                material = nextSceneRandom(randomState) < 0.5f ? 4u : 5u;
+            } else {
+                material = 6u;
+            }
+            hostScene.spheres.push_back(Sphere{center, 0.20f, material});
+        }
+    }
+
+    for (Triangle& triangle : lucy.triangles) {
+        // The shared mesh is instanced three times with per-instance material
+        // overrides, avoiding three copies of Lucy's geometry and BLAS.
+        triangle.material = 0;
+        triangle.lightIndex = invalidLightIndex;
+    }
+    hostScene.meshes.push_back(MeshAsset{std::move(lucy.triangles)});
+
+    constexpr float lucyScale = 0.0035f;
+    constexpr float lucyBaseOffset = -0.043f;
+    const Vec3 lucyOffsets[] = {
+        Vec3(-4.0f, lucyBaseOffset, 1.0f),
+        Vec3(4.0f, lucyBaseOffset, 1.0f),
+        Vec3(0.0f, lucyBaseOffset, 1.0f)};
+    const uint32_t lucyMaterials[] = {7u, 8u, 9u};
+    for (uint32_t index = 0; index < 3; ++index) {
+        hostScene.instances.push_back(SceneInstance{
+            0,
+            makeScaledTransform(lucyOffsets[index], lucyScale),
+            lucyMaterials[index]});
+    }
+
+    // Like the naive baseline, illumination comes from the sky background;
+    // there is intentionally no explicit area light or NEE shadow-ray work.
+    hostScene.blackBackground = false;
     return hostScene;
 }
 

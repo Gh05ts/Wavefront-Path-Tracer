@@ -1,0 +1,13 @@
+{
+  "name": "rtweek",
+  "preset": "rtweek",
+  "object": {
+    "source": "obj",
+    "file": "../../../../rt/lucy.obj"
+  },
+  "acceleration": "tlas_blas_bvh2",
+  "normal_maps": {
+    "enabled": false,
+    "minimum_cosine": 0.0
+  }
+}

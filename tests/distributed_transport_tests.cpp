@@ -113,6 +113,22 @@ int main() {
     }
 
     {
+        WorkerHelloAcceptedMessage original{true, "configured"};
+        original.jobFingerprint = 0xfeed1234ull;
+        original.hasConfiguration = true;
+        original.configuration.width = 640;
+        original.configuration.enableCaustics = true;
+        original.configuration.scene.preset = ScenePreset::Crystal;
+        original.configuration.scene.name = "crystal";
+        DistributedMessage decoded;
+        valid &= check(roundTrip(original, decoded), "worker configuration did not round-trip");
+        const auto* value = std::get_if<WorkerHelloAcceptedMessage>(&decoded);
+        valid &= check(value != nullptr && value->hasConfiguration &&
+            value->configuration.width == 640 && value->configuration.enableCaustics &&
+            value->configuration.scene.preset == ScenePreset::Crystal,
+            "worker configuration payload changed");
+    }
+    {
         AssetChunkMessage original{"Sponza.bin", 4096, 8192, 1234, true, {1, 2, 3, 4}};
         DistributedMessage decoded;
         valid &= check(roundTrip(original, decoded), "asset chunk did not round-trip");

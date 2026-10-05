@@ -166,7 +166,11 @@ void uploadMeshInstances(DeviceScene& deviceScene, const HostScene& hostScene) {
             worldBounds.bMax.z = fmaxf(worldBounds.bMax.z, worldPoint.z);
         }
 
-        hostInstances.push_back(MeshInstance{instance.meshIndex, lightOffset, instance.transform});
+        hostInstances.push_back(MeshInstance{
+            instance.meshIndex,
+            lightOffset,
+            instance.transform,
+            instance.materialOverride});
         for (const Triangle& triangle : hostScene.meshes[instance.meshIndex].triangles) {
             if (triangle.lightIndex != invalidLightIndex)
                 ++lightOffset;
@@ -280,6 +284,10 @@ DeviceScene uploadScene(const HostScene& hostScene) {
 
 DeviceScene createDemoScene() {
     return uploadScene(assembleDemoScene());
+}
+
+DeviceScene createRtWeekScene(const char* filename) {
+    return uploadScene(assembleRtWeekScene(filename));
 }
 
 DeviceScene createObjScene(const ObjSceneOptions& options) {

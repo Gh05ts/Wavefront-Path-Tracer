@@ -88,6 +88,7 @@ struct MeshInstance {
     uint32_t blasIndex;
     uint32_t lightOffset;
     InstanceTransform transform;
+    uint32_t materialOverride = invalidMaterialIndex;
 };
 
 struct MeshAsset {
@@ -97,6 +98,7 @@ struct MeshAsset {
 struct SceneInstance {
     uint32_t meshIndex;
     InstanceTransform transform;
+    uint32_t materialOverride = invalidMaterialIndex;
 };
 
 struct Scene {
@@ -201,6 +203,7 @@ struct ObjSceneOptions {
 };
 
 DeviceScene createDemoScene();
+DeviceScene createRtWeekScene(const char* filename);
 DeviceScene createObjScene(const ObjSceneOptions& options);
 DeviceScene createCornellScene(const CornellSceneOptions& options);
 DeviceScene createGltfScene(const char* filename, float sceneScale, bool addTopLight);

@@ -180,7 +180,8 @@ std::string primaryAssetPath(const SceneConfig& scene) {
     if (scene.preset == ScenePreset::Sponza)
         return scene.gltfFilename;
     if (scene.preset == ScenePreset::Cornell || scene.preset == ScenePreset::Hurricane ||
-        scene.preset == ScenePreset::Crystal || scene.preset == ScenePreset::Deer) {
+        scene.preset == ScenePreset::Crystal || scene.preset == ScenePreset::Deer ||
+        scene.preset == ScenePreset::RtWeek) {
         if (scene.objectSource == CornellObjectSource::ProceduralPrism)
             return {};
         return scene.objectFilename;

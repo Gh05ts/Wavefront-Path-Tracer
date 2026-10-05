@@ -100,6 +100,19 @@ int main() {
         "disconnect did not release the remaining leased tasks");
 
     DistributedCoordinator invalidCoordinator(job, tasks);
+
+    DistributedWorkerConfiguration pushedConfiguration;
+    pushedConfiguration.width = 640;
+    DistributedCoordinator configuredCoordinator(job, tasks);
+    CoordinatorSessionConfig pushedSessionConfig;
+    pushedSessionConfig.workerConfiguration = &pushedConfiguration;
+    pushedSessionConfig.acceptWorkerConfiguration = true;
+    CoordinatorWorkerSession configuredSession(configuredCoordinator, pushedSessionConfig);
+    response = configuredSession.handleMessage(WorkerHelloMessage{fingerprint + 1, "worker-config"}, 0);
+    hello = std::get_if<WorkerHelloAcceptedMessage>(&response.message);
+    valid &= check(response.keepAlive && hello != nullptr && hello->accepted &&
+        hello->hasConfiguration && hello->configuration.width == 640,
+        "coordinator did not deliver pushed configuration");
     CoordinatorWorkerSession invalidSession(invalidCoordinator);
     response = invalidSession.handleMessage(WorkerHelloMessage{fingerprint + 1, "worker-b"}, 0);
     hello = std::get_if<WorkerHelloAcceptedMessage>(&response.message);

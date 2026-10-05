@@ -89,6 +89,7 @@ void appendSceneFingerprint(FingerprintBuilder& builder, const SceneConfig& scen
     case ScenePreset::Hurricane:
     case ScenePreset::Crystal:
     case ScenePreset::Deer:
+    case ScenePreset::RtWeek:
         builder.appendAsset(scene.objectFilename.c_str());
         break;
     case ScenePreset::Prism:

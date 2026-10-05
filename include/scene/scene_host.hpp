@@ -24,6 +24,7 @@ struct HostScene {
 };
 
 HostScene assembleDemoScene();
+HostScene assembleRtWeekScene(const char* filename);
 HostScene assembleObjScene(const ObjSceneOptions& options);
 HostScene assembleCornellScene(const CornellSceneOptions& options);
 HostScene assembleGltfScene(const char* filename, float sceneScale, bool addTopLight);

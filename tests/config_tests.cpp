@@ -15,7 +15,7 @@ bool check(bool condition, const char* message) {
 
 int main() {
     bool valid = true;
-    const char* names[] = {"sponza", "cornell", "hurricane", "prism", "crystal", "deer", "demo"};
+    const char* names[] = {"sponza", "cornell", "hurricane", "prism", "crystal", "deer", "rtweek", "demo"};
 
     for (const char* name : names) {
         ScenePreset preset = ScenePreset::Demo;
@@ -35,6 +35,10 @@ int main() {
     valid &= check(crystalConfig.convertObjectMaterialsToDielectric &&
         crystalConfig.objectSource == CornellObjectSource::Obj,
         "crystal manifest options were not loaded");
+    SceneConfig rtWeekConfig = scenePreset(ScenePreset::RtWeek);
+    valid &= check(rtWeekConfig.objectSource == CornellObjectSource::Obj &&
+        rtWeekConfig.objectFilename.find("lucy.obj") != std::string::npos,
+        "rtweek manifest options were not loaded");
 
     ScenePreset unknownPreset = ScenePreset::Demo;
     valid &= check(!parseScenePreset("unknown", unknownPreset), "unknown scene preset was accepted");
@@ -103,6 +107,19 @@ int main() {
         workerRender.coordinatorPort == 9010,
         "worker options did not update distributed configuration");
 
+    RenderConfig interactiveRender;
+    interactiveRender.distributedRole = DistributedRole::Coordinator;
+    SceneConfig interactiveScene = scenePreset(ScenePreset::Sponza);
+    std::vector<std::string> interactiveArguments;
+    valid &= check(parseCommandLineText(
+        "--scene crystal --caustics --push-assets --samples-per-task 8",
+        interactiveRender,
+        interactiveScene,
+        interactiveArguments), "interactive coordinator command was rejected");
+    valid &= check(interactiveScene.preset == ScenePreset::Crystal &&
+        interactiveRender.enableCaustics && interactiveRender.pushAssets &&
+        interactiveRender.distributedSamplesPerTask == 8,
+        "interactive coordinator command did not update configuration");
     RenderConfig fingerprintRender;
     SceneConfig fingerprintScene = scenePreset(ScenePreset::Demo);
     uint64_t firstFingerprint = computeRenderFingerprint(fingerprintRender, fingerprintScene);

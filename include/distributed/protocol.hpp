@@ -7,8 +7,9 @@
 
 #include "assets.hpp"
 #include "coordinator.hpp"
+#include "job_config.hpp"
 
-constexpr uint32_t distributedProtocolVersion = 3;
+constexpr uint32_t distributedProtocolVersion = 4;
 constexpr uint32_t distributedMaxMessageBytes = 128u * 1024u * 1024u;
 constexpr uint32_t distributedAssetChunkBytes = 4u * 1024u * 1024u;
 
@@ -38,6 +39,8 @@ struct WorkerHelloAcceptedMessage {
     uint64_t jobFingerprint = 0;
     std::string primaryAssetPath;
     std::vector<DistributedAssetDescriptor> assets;
+    bool hasConfiguration = false;
+    DistributedWorkerConfiguration configuration;
 };
 
 struct AssetRequestMessage {

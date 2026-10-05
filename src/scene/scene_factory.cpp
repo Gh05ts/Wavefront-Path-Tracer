@@ -12,6 +12,8 @@ bool usesCornellCamera(ScenePreset preset) {
 }
 
 Camera createSceneCamera(const SceneConfig& config, uint32_t width, uint32_t height) {
+    if (config.preset == ScenePreset::RtWeek)
+        return createRtWeekCamera(width, height);
     return usesCornellCamera(config.preset) ?
         createCornellCamera(width, height) : createDemoCamera(width, height);
 }
@@ -77,6 +79,9 @@ DeviceScene createSceneFromConfig(const SceneConfig& config) {
         options.acceleration = config.acceleration;
         return createObjScene(options);
     }
+
+    case ScenePreset::RtWeek:
+        return createRtWeekScene(config.objectFilename.empty() ? nullptr : config.objectFilename.c_str());
 
     case ScenePreset::Demo:
         return createDemoScene();

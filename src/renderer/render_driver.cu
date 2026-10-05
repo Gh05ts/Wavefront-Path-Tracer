@@ -8,6 +8,10 @@
 #include <utility>
 #include <vector>
 
+#include <iomanip>
+#include <openssl/sha.h>
+#include <sstream>
+
 #include "renderer/image_output.hpp"
 #include "renderer/render_fingerprint.hpp"
 #include "renderer/renderer.cuh"
@@ -40,6 +44,26 @@ bool isCausticPreset(ScenePreset preset) {
 
 float elapsedMilliseconds(std::chrono::steady_clock::time_point begin, std::chrono::steady_clock::time_point end) {
     return std::chrono::duration<float, std::milli>(end - begin).count();
+}
+
+std::string sha256Framebuffer(const std::vector<Vec3>& pixels) {
+    static_assert(sizeof(Vec3) == sizeof(float) * 3,
+                  "Vec3 must contain exactly three floats");
+
+    unsigned char digest[SHA256_DIGEST_LENGTH];
+
+    SHA256(
+        reinterpret_cast<const unsigned char*>(pixels.data()),
+        pixels.size() * sizeof(Vec3),
+        digest);
+
+    std::ostringstream output;
+    output << std::hex << std::setfill('0');
+
+    for (unsigned char byte : digest)
+        output << std::setw(2) << static_cast<unsigned int>(byte);
+
+    return output.str();
 }
 } // namespace
 
@@ -399,6 +423,8 @@ void RenderDriver::writeFinalImage() {
         std::cerr << "Render completed without accumulating any samples\n";
         std::exit(1);
     }
+
+    std::cout << "Raw framebuffer SHA-256: " << sha256Framebuffer(pixels) << '\n';
 
     for (Vec3& pixel : pixels)
         pixel = pixel / static_cast<float>(finalSampleCount);

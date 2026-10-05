@@ -1,10 +1,16 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <vector>
 #include "scene/scene.cuh"
 
-enum class ScenePreset { Sponza, Cornell, Hurricane, Prism, Crystal, Deer, Demo };
+enum class ScenePreset { Sponza, Cornell, Hurricane, Prism, Crystal, Deer, Demo, RtWeek };
 enum class DistributedRole { Local, Coordinator, Worker };
+
+enum class RngStrategy : uint32_t {
+    XorShift32 = 0, // current behavior
+    Pcg32 = 1
+};
 
 struct RenderConfig {
     uint32_t width = 1920, height = 1080, tileWidth = 960, tileHeight = 540;
@@ -30,6 +36,8 @@ struct RenderConfig {
     uint64_t distributedLeaseDurationMs = 30000;
     bool pushAssets = false;
     const char* assetCacheDirectory = ".pathtracer-assets";
+    bool pushConfigurationToWorkers = false;
+    RngStrategy rngStrategy = RngStrategy::XorShift32;
 };
 
 struct SceneConfig {
@@ -51,3 +59,5 @@ struct SceneConfig {
 SceneConfig scenePreset(ScenePreset preset);
 bool parseScenePreset(const char* value, ScenePreset& preset);
 bool parseCommandLine(int argc, char** argv, RenderConfig& render, SceneConfig& scene);
+bool parseCommandLineText(const std::string& command, RenderConfig& render, SceneConfig& scene,
+    std::vector<std::string>& argumentStorage);

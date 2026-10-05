@@ -67,6 +67,13 @@ than filename tests or compile-time boolean switches.
 
 Cornell/glTF-style scenes use a TLAS over mesh instances and one NexusBVH BVH2 BLAS per mesh. The simple/demo path can use the direct triangle representation and NexusBVH H-PLOC BVH2. BVH8 support is represented in the scene types and traversal code, but the current scene setup selects BVH2 (`useNexusBvh8 = false`). The legacy host BVH builders remain in `bvh.cpp` and `bvh_sbvh.cpp` for fallback/comparison paths.
 
+The `rtweek` benchmark scene uses one shared Lucy BLAS for three instances with
+per-instance material overrides. This keeps the diffuse, metal, and dielectric
+hero objects comparable to the naive baseline without tripling the geometry
+upload or BVH build. Its deterministic mixed-material sphere field and sky
+background are assembled on the host from the `assets/scenes/rtweek.json`
+manifest.
+
 Named presets are now data-driven rather than a second set of hard-coded scene
 switches. `--scene NAME` loads `assets/scenes/NAME.json`, while
 `--scene-file FILE` loads an arbitrary manifest with the same schema. The
@@ -130,7 +137,8 @@ include/distributed/
     task.hpp            Task IDs, tile/sample ranges, and result metadata
     coordinator.hpp     Host-only task queue, leases, and result commits
     checkpoint.hpp      Distributed checkpoint model and serialization
-    job.hpp             Stable job specification and fingerprint inputs (next)
+    checkpoint_writer.hpp Background distributed checkpoint I/O
+    job_config.hpp      Coordinator-selected worker render/scene settings
     protocol.hpp        Versioned wire message types
     transport.hpp       Framed TCP transport
     worker.hpp          Worker registration and task loop
@@ -217,18 +225,16 @@ snapshot, but the task ID prevents any result from being merged twice.
 
 ### Scene and photon distribution
 
-The first implementation assumes workers have access to the same asset bundle
-and renderer build. The coordinator sends the scene/config manifest and
-fingerprint; workers validate their local assets before accepting tasks. The
-scene-manifest layer is now in place, and asset shipping/cache population is
-available through `--push-assets`. The coordinator builds a catalog of the
-primary geometry file and loader dependencies, sends it in the registration
-response, and serves missing files in bounded chunks. Workers verify every
-chunked file by size and FNV-1a checksum, cache it under a job-fingerprint
-directory, rewrite the primary scene path, and validate the final render
-fingerprint before creating CUDA scene state. The manifest/configuration itself
-is still supplied to each process separately; transferring that job definition
-is the next distributed step.
+Workers must use a compatible renderer build. The coordinator can now select the
+authoritative render/scene configuration interactively with `./pathtracer
+--coordinator`; it sends that configuration in the worker registration response
+before any task request. Asset shipping/cache population remains optional via
+`--push-assets`. The coordinator builds a catalog of the primary geometry file
+and loader dependencies, sends it in the registration response, and serves
+missing files in bounded chunks. Workers verify every chunked file by size and
+FNV-1a checksum, cache it under a job-fingerprint directory, rewrite the
+primary scene path, and validate the final render fingerprint before creating
+CUDA scene state.
 
 For caustic renders, each worker builds the deterministic photon map once and
 reuses it for all assigned tasks. The photon map is derived worker state and
@@ -266,9 +272,9 @@ add worker-failure and coordinator-restart integration tests.
 `--scene-file` without changing the scene factory or CUDA interfaces.
 10. **Complete:** distribute and cache manifest-referenced assets before
 worker scene construction with chunked, checksum-validated transfers.
-11. **Next:** transfer the authoritative scene manifest and render
-configuration from coordinator to workers, rather than requiring matching
-configuration arguments on every process.
+11. **Complete:** parse an interactive coordinator command and transfer the
+authoritative render/scene configuration during worker registration, preserving
+fingerprint validation.
 
 The first end-to-end milestone is a single coordinator and one worker producing
 the same image as local rendering, followed by worker-failure and coordinator-
@@ -325,10 +331,6 @@ incompatible resume before rendering continues.
 - Complete an end-to-end multi-process asset-transfer test with a coordinator
   and worker, including cache reuse, interrupted transfers, and a worker that
   starts without the scene assets installed.
-- Transfer the JSON scene manifest and render configuration from the
-  coordinator so workers do not need manually synchronized `--scene`,
-  `--scene-file`, or render-affecting options. Preserve fingerprint validation
-  after applying the received configuration.
 - Add a manifest `camera` block for position, target/orientation, up vector,
   and vertical field of view. Keep the existing Cornell/demo camera defaults
   when the block is absent.

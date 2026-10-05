@@ -32,15 +32,16 @@ DistributedTaskResult convertResult(const RenderTaskResult& localResult, uint64_
 } // namespace
 
 int runDistributedWorker(const RenderConfig& config, const SceneConfig& scene) {
+    RenderConfig workerConfig = config;
     SceneConfig workerScene = scene;
     // With asset transfer enabled, the worker may not have the primary asset
     // yet, so defer fingerprint calculation until the cache is populated.
-    uint64_t fingerprint = config.pushAssets ? 0 : computeRenderFingerprint(config, workerScene);
+    uint64_t fingerprint = workerConfig.pushAssets ? 0 : computeRenderFingerprint(workerConfig, workerScene);
     std::string error;
     auto client = DistributedWorkerClient::connectToCoordinator(
-        config.coordinatorHost,
-        config.coordinatorPort,
-        config.workerId,
+        workerConfig.coordinatorHost,
+        workerConfig.coordinatorPort,
+        workerConfig.workerId,
         fingerprint,
         &error);
     if (!client) {
@@ -48,31 +49,45 @@ int runDistributedWorker(const RenderConfig& config, const SceneConfig& scene) {
         return 1;
     }
 
-    std::cout << "Registered distributed worker: " << config.workerId << '\n';
+    std::cout << "Registered distributed worker: " << workerConfig.workerId << '\n';
 
-    if (config.pushAssets) {
-        if (!client->synchronizeAssets(workerScene, config.assetCacheDirectory, &error)) {
+    if (client->hasCoordinatorConfiguration()) {
+        applyDistributedWorkerConfiguration(
+            client->coordinatorConfiguration(), workerConfig, workerScene);
+        std::cout << "Applied render configuration from coordinator\n";
+    }
+
+    if (workerConfig.pushAssets) {
+        if (!client->synchronizeAssets(workerScene, workerConfig.assetCacheDirectory, &error)) {
             std::cerr << "Could not synchronize distributed assets: " << error << '\n';
             client->close();
             return 1;
         }
-        fingerprint = computeRenderFingerprint(config, workerScene);
+        fingerprint = computeRenderFingerprint(workerConfig, workerScene);
         if (fingerprint != client->coordinatorJobFingerprint()) {
             std::cerr << "Transferred assets produced a different render fingerprint\n";
             client->close();
             return 1;
         }
-        std::cout << "Synchronized " << config.assetCacheDirectory << " assets\n";
+        std::cout << "Synchronized " << workerConfig.assetCacheDirectory << " assets\n";
     }
 
-    Camera camera = createSceneCamera(workerScene, config.width, config.height);
+    if (client->hasCoordinatorConfiguration() && !workerConfig.pushAssets) {
+        fingerprint = computeRenderFingerprint(workerConfig, workerScene);
+        if (fingerprint != client->coordinatorJobFingerprint()) {
+            std::cerr << "Coordinator configuration produced a different render fingerprint\n";
+            client->close();
+            return 1;
+        }
+    }
+    Camera camera = createSceneCamera(workerScene, workerConfig.width, workerConfig.height);
     DeviceScene deviceScene = createSceneFromConfig(workerScene);
     applySceneConfig(deviceScene, workerScene);
     std::cout << "Scene preset: " << workerScene.name << '\n';
 
     int resultCode = 0;
     {
-        RenderDriver renderDriver(deviceScene, camera, config, workerScene);
+        RenderDriver renderDriver(deviceScene, camera, workerConfig, workerScene);
         RenderTaskRenderer taskRenderer(renderDriver);
 
         bool hasTask = false;
@@ -103,7 +118,7 @@ int runDistributedWorker(const RenderConfig& config, const SceneConfig& scene) {
             std::string heartbeatError;
             const uint64_t heartbeatIntervalMs = std::max<uint64_t>(
                 1000ull,
-                config.distributedLeaseDurationMs / 3ull);
+                workerConfig.distributedLeaseDurationMs / 3ull);
             std::thread heartbeatThread([&] {
                 while (!stopHeartbeat.load()) {
                     const auto deadline = std::chrono::steady_clock::now() +

@@ -14,6 +14,7 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
 endif()
 
 find_package(CUDAToolkit REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 set(NEXUSBVH_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(NEXUSBVH_INSTALL OFF CACHE BOOL "" FORCE)
@@ -44,6 +45,7 @@ add_executable(pathtracer
     src/distributed/task.cpp
     src/distributed/assets.cpp
     src/distributed/checkpoint.cpp
+    src/distributed/checkpoint_writer.cpp
     src/distributed/coordinator.cpp
     src/distributed/protocol.cpp
     src/distributed/transport.cpp
@@ -64,6 +66,7 @@ target_link_libraries(pathtracer
     PRIVATE
         NXB::NexusBVH
         CUDA::cudart
+        OpenSSL::Crypto
         stdc++fs
 )
 

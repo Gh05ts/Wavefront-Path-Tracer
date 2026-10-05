@@ -29,3 +29,4 @@ struct Camera {
 
 Camera createDemoCamera(uint32_t width, uint32_t height);
 Camera createCornellCamera(uint32_t width, uint32_t height);
+Camera createRtWeekCamera(uint32_t width, uint32_t height);

@@ -1,4 +1,6 @@
 #include <iostream>
+#include <string>
+#include <vector>
 
 #include "config.hpp"
 #include "distributed/coordinator_app.hpp"
@@ -11,6 +13,21 @@ int main(int argc, char** argv) {
     SceneConfig sceneConfig = scenePreset(ScenePreset::Sponza);
     if (!parseCommandLine(argc, argv, config, sceneConfig))
         return 0;
+
+    const bool interactiveCoordinator = argc == 2 &&
+        std::string(argv[1]) == "--coordinator";
+    std::vector<std::string> coordinatorCommandArguments;
+    if (interactiveCoordinator) {
+        std::cout << "Enter scene/render options for distributed workers "
+                     "(for example: --scene sponza --push-assets --caustics):\n> "
+                  << std::flush;
+        std::string command;
+        if (!std::getline(std::cin, command) ||
+            !parseCommandLineText(command, config, sceneConfig, coordinatorCommandArguments))
+            return 1;
+        config.pushConfigurationToWorkers = true;
+        std::cout << "Coordinator configuration will be sent to workers before task requests\n";
+    }
 
     if (config.distributedRole == DistributedRole::Coordinator)
         return runDistributedCoordinator(config, sceneConfig);

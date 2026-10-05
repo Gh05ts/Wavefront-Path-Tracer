@@ -147,6 +147,8 @@ private:
     bool valid_ = true;
 };
 
+void appendWorkerConfiguration(Writer& writer, const DistributedWorkerConfiguration& configuration);
+bool readWorkerConfiguration(Reader& reader, DistributedWorkerConfiguration& configuration);
 void appendTile(Writer& writer, const DistributedTile& tile) {
     writer.u32(tile.x);
     writer.u32(tile.y);
@@ -223,6 +225,85 @@ bool readResult(Reader& reader, DistributedTaskResult& result) {
     return true;
 }
 
+void appendWorkerConfiguration(Writer& writer, const DistributedWorkerConfiguration& configuration) {
+    auto appendBool = [&writer](bool value) { writer.u8(value ? 1 : 0); };
+    writer.u32(configuration.width); writer.u32(configuration.height);
+    writer.u32(configuration.tileWidth); writer.u32(configuration.tileHeight);
+    writer.u32(configuration.maxDepth); writer.u32(configuration.russianRouletteStartDepth);
+    writer.u32(configuration.samplesPerPixel); writer.u32(configuration.blockSize);
+    appendBool(configuration.tiledRendering); appendBool(configuration.intersectionDebug);
+    appendBool(configuration.shadingNormalDebug); appendBool(configuration.persistentWavefront);
+    appendBool(configuration.profileQueues); appendBool(configuration.enableCaustics);
+    appendBool(configuration.enableCausticGather);
+    writer.u32(configuration.causticPhotonCount); writer.u32(configuration.causticMaxDepth);
+    writer.float32(configuration.causticGatherRadius); appendBool(configuration.pushAssets);
+
+    const SceneConfig& scene = configuration.scene;
+    writer.u32(static_cast<uint32_t>(scene.preset));
+    writer.string(scene.name); writer.string(scene.objectFilename); writer.string(scene.gltfFilename);
+    writer.float32(scene.gltfScale); writer.float32(scene.objectScale);
+    writer.float32(scene.objectTranslation.x); writer.float32(scene.objectTranslation.y);
+    writer.float32(scene.objectTranslation.z);
+    writer.u32(static_cast<uint32_t>(scene.objectSource));
+    writer.u32(static_cast<uint32_t>(scene.lightProfile));
+    writer.u32(static_cast<uint32_t>(scene.acceleration));
+    appendBool(scene.neutralRoom); appendBool(scene.removeBackdrop);
+    appendBool(scene.convertObjectMaterialsToDielectric);
+    writer.u32(static_cast<uint32_t>(scene.objectMaterialOverride));
+    appendBool(scene.addSponzaTopLight); appendBool(scene.ignoreSponzaLightOcclusion);
+    appendBool(scene.useNormalMaps); writer.float32(scene.normalMapMinimumCosine);
+}
+
+bool readWorkerConfiguration(Reader& reader, DistributedWorkerConfiguration& configuration) {
+    auto readBool = [&reader](bool& value) {
+        uint8_t raw = 0;
+        if (!reader.u8(raw) || raw > 1)
+            return false;
+        value = raw != 0;
+        return true;
+    };
+    uint32_t preset = 0;
+    uint32_t objectSource = 0;
+    uint32_t lightProfile = 0;
+    uint32_t acceleration = 0;
+    uint32_t materialOverride = 0;
+    if (!reader.u32(configuration.width) || !reader.u32(configuration.height) ||
+        !reader.u32(configuration.tileWidth) || !reader.u32(configuration.tileHeight) ||
+        !reader.u32(configuration.maxDepth) || !reader.u32(configuration.russianRouletteStartDepth) ||
+        !reader.u32(configuration.samplesPerPixel) || !reader.u32(configuration.blockSize))
+        return false;
+    if (!readBool(configuration.tiledRendering) || !readBool(configuration.intersectionDebug) ||
+        !readBool(configuration.shadingNormalDebug) || !readBool(configuration.persistentWavefront) ||
+        !readBool(configuration.profileQueues) || !readBool(configuration.enableCaustics) ||
+        !readBool(configuration.enableCausticGather))
+        return false;
+    if (!reader.u32(configuration.causticPhotonCount) || !reader.u32(configuration.causticMaxDepth) ||
+        !reader.float32(configuration.causticGatherRadius) || !readBool(configuration.pushAssets))
+        return false;
+
+    SceneConfig& scene = configuration.scene;
+    if (!reader.u32(preset) || !reader.string(scene.name) ||
+        !reader.string(scene.objectFilename) || !reader.string(scene.gltfFilename) ||
+        !reader.float32(scene.gltfScale) || !reader.float32(scene.objectScale) ||
+        !reader.float32(scene.objectTranslation.x) || !reader.float32(scene.objectTranslation.y) ||
+        !reader.float32(scene.objectTranslation.z) || !reader.u32(objectSource) ||
+        !reader.u32(lightProfile) || !reader.u32(acceleration) ||
+        !readBool(scene.neutralRoom) || !readBool(scene.removeBackdrop) ||
+        !readBool(scene.convertObjectMaterialsToDielectric) || !reader.u32(materialOverride) ||
+        !readBool(scene.addSponzaTopLight) || !readBool(scene.ignoreSponzaLightOcclusion) ||
+        !readBool(scene.useNormalMaps) || !reader.float32(scene.normalMapMinimumCosine))
+        return false;
+    if (preset > static_cast<uint32_t>(ScenePreset::RtWeek) || objectSource > 2 ||
+        lightProfile > 2 || acceleration > 4)
+        return false;
+    scene.preset = static_cast<ScenePreset>(preset);
+    scene.objectSource = static_cast<CornellObjectSource>(objectSource);
+    scene.lightProfile = static_cast<CornellLightProfile>(lightProfile);
+    scene.acceleration = static_cast<ObjAccelerationPolicy>(acceleration);
+    scene.objectMaterialOverride = static_cast<int32_t>(materialOverride);
+    return true;
+}
+
 bool validCommitStatus(uint32_t value) {
     return value <= static_cast<uint32_t>(DistributedCommitStatus::Rejected);
 }
@@ -284,6 +365,9 @@ bool encodeDistributedMessage(const DistributedMessage& message, std::vector<uin
                 writer.u64(asset.byteSize);
                 writer.u64(asset.checksum);
             }
+            writer.u8(value.hasConfiguration ? 1 : 0);
+            if (value.hasConfiguration)
+                appendWorkerConfiguration(writer, value.configuration);
         } else if constexpr (std::is_same_v<Message, TaskRequestMessage>) {
             writer.string(value.workerId);
         } else if constexpr (std::is_same_v<Message, TaskAssignmentMessage>) {
@@ -358,6 +442,7 @@ bool decodeDistributedMessage(const std::vector<uint8_t>& bytes, DistributedMess
         WorkerHelloAcceptedMessage value;
         uint8_t accepted = 0;
         uint32_t assetCount = 0;
+        uint8_t hasConfiguration = 0;
         if (!reader.u8(accepted) || accepted > 1 || !reader.string(value.message) ||
             !reader.u64(value.jobFingerprint) || !reader.string(value.primaryAssetPath) ||
             !reader.u32(assetCount) || assetCount > maxAssetFiles)
@@ -372,6 +457,10 @@ bool decodeDistributedMessage(const std::vector<uint8_t>& bytes, DistributedMess
         }
         if (value.assets.size() != assetCount)
             break;
+        if (!reader.u8(hasConfiguration) || hasConfiguration > 1 ||
+            (hasConfiguration != 0 && !readWorkerConfiguration(reader, value.configuration)))
+            break;
+        value.hasConfiguration = hasConfiguration != 0;
         message = std::move(value);
         goto decoded;
     }

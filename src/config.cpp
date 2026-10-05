@@ -1,6 +1,7 @@
 #include "config.hpp"
 #include "scene/scene_manifest.hpp"
 
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -8,7 +9,7 @@
 #include <string>
 
 static const char* nameOf(ScenePreset preset) {
-    switch (preset) { case ScenePreset::Sponza: return "sponza"; case ScenePreset::Cornell: return "cornell"; case ScenePreset::Hurricane: return "hurricane"; case ScenePreset::Prism: return "prism"; case ScenePreset::Crystal: return "crystal"; case ScenePreset::Deer: return "deer"; case ScenePreset::Demo: return "demo"; }
+    switch (preset) { case ScenePreset::Sponza: return "sponza"; case ScenePreset::Cornell: return "cornell"; case ScenePreset::Hurricane: return "hurricane"; case ScenePreset::Prism: return "prism"; case ScenePreset::Crystal: return "crystal"; case ScenePreset::Deer: return "deer"; case ScenePreset::RtWeek: return "rtweek"; case ScenePreset::Demo: return "demo"; }
     return "unknown";
 }
 
@@ -17,7 +18,7 @@ static void printHelp() {
               << "Options:\n"
               << "  --help, -h              Show this help text\n"
               << "  --scene NAME             Select a scene preset\n"
-              << "                           NAME: sponza, cornell, hurricane, prism, crystal, deer, demo\n"
+              << "                           NAME: sponza, cornell, hurricane, prism, crystal, deer, rtweek, demo\n"
               << "  --scene-file FILE        Load a scene manifest JSON file\n"
               << "  --list-scenes            List available scene presets\n"
               << "  --caustics               Enable photon-mapped caustics (Cornell/Hurricane/Prism/Crystal)\n"
@@ -107,6 +108,7 @@ bool parseScenePreset(const char* value, ScenePreset& preset) {
     else if (!std::strcmp(value, "prism")) preset = ScenePreset::Prism;
     else if (!std::strcmp(value, "crystal")) preset = ScenePreset::Crystal;
     else if (!std::strcmp(value, "deer")) preset = ScenePreset::Deer;
+    else if (!std::strcmp(value, "rtweek")) preset = ScenePreset::RtWeek;
     else if (!std::strcmp(value, "demo")) preset = ScenePreset::Demo;
     else return false;
     return true;
@@ -115,7 +117,7 @@ bool parseScenePreset(const char* value, ScenePreset& preset) {
 bool parseCommandLine(int argc, char** argv, RenderConfig& render, SceneConfig& scene) {
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--list-scenes")) {
-            std::cout << "Scene presets: sponza, cornell, hurricane, prism, crystal, deer, demo\n";
+            std::cout << "Scene presets: sponza, cornell, hurricane, prism, crystal, deer, rtweek, demo\n";
             return false;
         }
         if (!std::strcmp(argv[i], "--help") || !std::strcmp(argv[i], "-h")) {
@@ -213,4 +215,64 @@ bool parseCommandLine(int argc, char** argv, RenderConfig& render, SceneConfig& 
     }
     if (render.intersectionDebug || render.shadingNormalDebug) render.samplesPerPixel = 1;
     return true;
+}
+
+bool parseCommandLineText(
+    const std::string& command,
+    RenderConfig& render,
+    SceneConfig& scene,
+    std::vector<std::string>& argumentStorage) {
+    argumentStorage.clear();
+    argumentStorage.emplace_back("pathtracer");
+
+    std::string token;
+    bool singleQuoted = false;
+    bool doubleQuoted = false;
+    bool escaped = false;
+    bool tokenStarted = false;
+    auto flushToken = [&] {
+        if (!tokenStarted)
+            return;
+        argumentStorage.push_back(std::move(token));
+        token.clear();
+        tokenStarted = false;
+    };
+
+    for (char character : command) {
+        if (escaped) {
+            token.push_back(character);
+            tokenStarted = true;
+            escaped = false;
+        } else if (character == '\\' && !singleQuoted) {
+            escaped = true;
+            tokenStarted = true;
+        } else if (character == '\'' && !doubleQuoted) {
+            singleQuoted = !singleQuoted;
+            tokenStarted = true;
+        } else if (character == '"' && !singleQuoted) {
+            doubleQuoted = !doubleQuoted;
+            tokenStarted = true;
+        } else if (std::isspace(static_cast<unsigned char>(character)) &&
+                   !singleQuoted && !doubleQuoted) {
+            flushToken();
+        } else {
+            token.push_back(character);
+            tokenStarted = true;
+        }
+    }
+    if (escaped || singleQuoted || doubleQuoted) {
+        std::cerr << "Unterminated escape or quote in coordinator command\n";
+        return false;
+    }
+    flushToken();
+    if (argumentStorage.size() == 1) {
+        std::cerr << "Coordinator command cannot be empty\n";
+        return false;
+    }
+
+    std::vector<char*> argv;
+    argv.reserve(argumentStorage.size());
+    for (std::string& argument : argumentStorage)
+        argv.push_back(argument.data());
+    return parseCommandLine(static_cast<int>(argv.size()), argv.data(), render, scene);
 }

@@ -37,7 +37,10 @@ cd build
 ```
 
 Available presets are `sponza`, `cornell`, `hurricane`, `prism`, `crystal`,
-`deer`, and `demo`. Useful runtime switches include:
+`deer`, `rtweek`, and `demo`. The `rtweek` preset is a deterministic
+Ray Tracing in One Weekend-style sphere field with three instanced Lucy hero
+objects; it uses `/home/myid/lv37348/rt/lucy.obj` through the manifest's
+relative asset path. Useful runtime switches include:
 
 ```text
 --help                 show command-line help
@@ -70,10 +73,29 @@ instead, pass `--push-assets` to both processes:
     --coordinator-host coordinator-hostname
 ```
 
+For coordinator-selected configuration, start the coordinator with no other
+arguments. It prompts for the scene and render options, then sends the parsed
+configuration to every worker during registration before any task is leased:
+
+```sh
+# coordinator
+./pathtracer --coordinator
+# enter at the prompt, for example:
+--scene sponza --push-assets --caustics --samples-per-task 16
+
+# workers only need connection identity/settings
+./pathtracer --worker --worker-id gpu-0 --coordinator-host coordinator-hostname
+```
+
+The workers retain their own coordinator connection and asset-cache settings;
+scene, render, caustic, tiling, and task-compatible settings come from the
+coordinator. Include `--push-assets` in the prompted command when workers do
+not already have the referenced scene assets.
 Workers cache verified files under `.pathtracer-assets/` by default; override
-that location with `--asset-cache DIR`. The coordinator still selects the
-scene/render configuration through the command line or `--scene-file`; the
-next distributed step is transferring that manifest/configuration itself.
+that location with `--asset-cache DIR`. In interactive coordinator mode, the
+parsed scene/render configuration is sent during worker registration. In the
+explicit command-line mode, keep coordinator and worker render settings
+compatible, or use `--push-assets` when the coordinator owns the asset bundle.
 
 The output image defaults to `render.ppm`. Checkpoints are written to
 `render.checkpoint` when the asynchronous checkpoint queue is able to accept
