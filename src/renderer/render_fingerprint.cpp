@@ -6,6 +6,8 @@
 
 namespace
 {
+constexpr uint32_t rngImplementationVersion = 1;
+
 class FingerprintBuilder {
 public:
     FingerprintBuilder() = default;
@@ -133,6 +135,8 @@ void appendRenderFingerprint(FingerprintBuilder& builder, const RenderConfig& re
     builder.appendU32(render.causticPhotonCount);
     builder.appendU32(render.causticMaxDepth);
     builder.appendFloat(render.causticGatherRadius);
+    builder.appendU32(static_cast<uint32_t>(render.rngStrategy));
+    builder.appendU32(rngImplementationVersion);
 }
 } // namespace
 

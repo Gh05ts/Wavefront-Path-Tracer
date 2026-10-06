@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../core/ray.cuh"
+#include "../core/rng.cuh"
 
 struct PathState {
     Ray ray;
@@ -11,7 +12,7 @@ struct PathState {
     uint32_t pixelIndex;
     uint32_t depth;
 
-    uint32_t rngState;
+    RngState rngState;
     uint32_t mediumMaterial = 0xffffffffu;
     float mediumDensity = 1.0f;
 

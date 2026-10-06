@@ -13,6 +13,7 @@ struct DistributedWorkerConfiguration {
     uint32_t russianRouletteStartDepth = 12;
     uint32_t samplesPerPixel = 512;
     uint32_t blockSize = 256;
+    RngStrategy rngStrategy = RngStrategy::XorShift32;
     bool tiledRendering = true;
     bool intersectionDebug = false;
     bool shadingNormalDebug = false;
@@ -39,6 +40,7 @@ inline DistributedWorkerConfiguration makeDistributedWorkerConfiguration(
     configuration.russianRouletteStartDepth = render.russianRouletteStartDepth;
     configuration.samplesPerPixel = render.samplesPerPixel;
     configuration.blockSize = render.blockSize;
+    configuration.rngStrategy = render.rngStrategy;
     configuration.tiledRendering = render.tiledRendering;
     configuration.intersectionDebug = render.intersectionDebug;
     configuration.shadingNormalDebug = render.shadingNormalDebug;
@@ -66,6 +68,7 @@ inline void applyDistributedWorkerConfiguration(
     render.russianRouletteStartDepth = configuration.russianRouletteStartDepth;
     render.samplesPerPixel = configuration.samplesPerPixel;
     render.blockSize = configuration.blockSize;
+    render.rngStrategy = configuration.rngStrategy;
     render.tiledRendering = configuration.tiledRendering;
     render.intersectionDebug = configuration.intersectionDebug;
     render.shadingNormalDebug = configuration.shadingNormalDebug;

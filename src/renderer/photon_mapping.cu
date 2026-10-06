@@ -2,11 +2,12 @@
 #include "core/rng.cuh"
 
 __global__
-void emitPhotons(PhotonQueue photons, Scene scene, uint32_t photonCount, uint32_t seed, bool spectralSampling) {
+void emitPhotons(PhotonQueue photons, Scene scene, uint32_t photonCount, uint32_t seed, RngStrategy rngStrategy, bool spectralSampling) {
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= photonCount || scene.lightCount == 0)
         return;
-    uint32_t rngState = makeRngSeed(seed ^ (index * 0x9e3779b9u));
+
+    RngState rngState = makeRngState(photonRngKey(index, seed, rngStrategy), rngStrategy);
     uint32_t candidate = min(static_cast<uint32_t>(randomFloat(rngState) * scene.lightCount), scene.lightCount - 1);
     uint32_t lightIndex = randomFloat(rngState) < scene.lightAlias[candidate].probability ? candidate : scene.lightAlias[candidate].alias;
     const TriangleLight& light = scene.lights[lightIndex];

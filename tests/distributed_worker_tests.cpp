@@ -103,6 +103,7 @@ int main() {
 
     DistributedWorkerConfiguration pushedConfiguration;
     pushedConfiguration.width = 640;
+    pushedConfiguration.rngStrategy = RngStrategy::Pcg32;
     DistributedCoordinator configuredCoordinator(job, tasks);
     CoordinatorSessionConfig pushedSessionConfig;
     pushedSessionConfig.workerConfiguration = &pushedConfiguration;
@@ -111,7 +112,8 @@ int main() {
     response = configuredSession.handleMessage(WorkerHelloMessage{fingerprint + 1, "worker-config"}, 0);
     hello = std::get_if<WorkerHelloAcceptedMessage>(&response.message);
     valid &= check(response.keepAlive && hello != nullptr && hello->accepted &&
-        hello->hasConfiguration && hello->configuration.width == 640,
+        hello->hasConfiguration && hello->configuration.width == 640 &&
+        hello->configuration.rngStrategy == RngStrategy::Pcg32,
         "coordinator did not deliver pushed configuration");
     CoordinatorWorkerSession invalidSession(invalidCoordinator);
     response = invalidSession.handleMessage(WorkerHelloMessage{fingerprint + 1, "worker-b"}, 0);

@@ -15,14 +15,14 @@ struct TraceResult {
 
 __device__ TraceResult traceRay(const Ray& ray, Scene scene);
 __device__ TraceResult traceRayExternal(const Ray& ray, Scene scene);
-__device__ Vec3 sampleCosineHemisphere(const Vec3& normal, uint32_t& rngState);
+__device__ Vec3 sampleCosineHemisphere(const Vec3& normal, RngState& rngState);
 __device__ Vec3 reflect(const Vec3& incident, const Vec3& normal);
 __device__ Vec3 refract(const Vec3& incident, const Vec3& normal, float eta);
 __device__ float schlickReflectance(float cosine, float refractionRatio);
 __device__ Vec3 gatherCaustics(const Hit& hit, PhotonGrid grid, float radius);
 
 __global__
-void emitPhotons(PhotonQueue photons, Scene scene, uint32_t photonCount, uint32_t seed, bool spectralSampling);
+void emitPhotons(PhotonQueue photons, Scene scene, uint32_t photonCount, uint32_t seed, RngStrategy rngStrategy, bool spectralSampling);
 
 __global__
 void tracePhotons(PhotonQueue photons, Scene scene, uint32_t photonCount, uint32_t maxDepth, uint32_t* materialHitCounts);
@@ -38,7 +38,8 @@ void generatePrimaryRays(
     uint32_t width,
     uint32_t height,
     const uint32_t* sampleIndex,
-    const RenderTile* tile
+    const RenderTile* tile,
+    RngStrategy rngStrategy
 );
 
 __global__
@@ -78,6 +79,7 @@ void persistentWavefrontTrace(
     uint32_t height,
     const uint32_t* sampleIndex,
     const RenderTile* tile,
+    RngStrategy rngStrategy,
     Scene scene,
     uint32_t maxDepth,
     uint32_t russianRouletteStartDepth,

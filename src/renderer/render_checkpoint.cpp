@@ -15,7 +15,7 @@
 namespace
 {
 constexpr char checkpointMagic[8] = {'P', 'T', 'C', 'H', 'K', 'P', 'T', '1'};
-constexpr uint32_t checkpointVersion = 2;
+constexpr uint32_t checkpointVersion = 3;
 
 struct CheckpointHeader {
     char magic[8];

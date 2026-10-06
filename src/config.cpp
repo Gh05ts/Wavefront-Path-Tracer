@@ -44,7 +44,8 @@ static void printHelp() {
               << "  --distributed-lease-seconds N\n"
               << "                           Worker lease duration (default: 30)\n"
               << "  --push-assets            Transfer scene assets to distributed workers\n"
-              << "  --asset-cache DIR        Worker asset cache directory\n";
+              << "  --asset-cache DIR        Worker asset cache directory\n"
+              << "  --rng STRATEGY           RNG strategy: xorshift32 or pcg32\n";
 }
 
 static bool parsePort(const char* value, uint16_t& port) {
@@ -67,6 +68,22 @@ static bool parsePositiveUint32(const char* value, uint32_t& output) {
         return false;
     output = static_cast<uint32_t>(parsed);
     return true;
+}
+
+static bool parseRngStrategy(
+    const char* value,
+    RngStrategy& strategy) {
+    if (!std::strcmp(value, "xorshift32")) {
+        strategy = RngStrategy::XorShift32;
+        return true;
+    }
+
+    if (!std::strcmp(value, "pcg32")) {
+        strategy = RngStrategy::Pcg32;
+        return true;
+    }
+
+    return false;
 }
 
 SceneConfig scenePreset(ScenePreset preset) {
@@ -123,6 +140,13 @@ bool parseCommandLine(int argc, char** argv, RenderConfig& render, SceneConfig& 
         if (!std::strcmp(argv[i], "--help") || !std::strcmp(argv[i], "-h")) {
             printHelp();
             return false;
+        }
+        if (!std::strcmp(argv[i], "--rng") && i + 1 < argc) {
+            if (!parseRngStrategy(argv[++i], render.rngStrategy)) {
+                std::cerr << "RNG strategy must be xorshift32 or pcg32\n";
+                return false;
+            }
+            continue;
         }
         if (!std::strcmp(argv[i], "--no-caustics")) { render.enableCaustics = false; continue; }
         if (!std::strcmp(argv[i], "--caustics")) { render.enableCaustics = true; continue; }

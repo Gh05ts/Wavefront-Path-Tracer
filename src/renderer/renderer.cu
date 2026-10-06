@@ -8,7 +8,7 @@
 namespace cg = cooperative_groups;
 
 __global__
-void generatePrimaryRays(RayQueue queue, PathState* pathStates, Camera camera, uint32_t width, uint32_t height, const uint32_t* sampleIndex, const RenderTile* tile) {
+void generatePrimaryRays(RayQueue queue, PathState* pathStates, Camera camera, uint32_t width, uint32_t height, const uint32_t* sampleIndex, const RenderTile* tile, RngStrategy rngStrategy) {
     uint32_t localPixel = blockIdx.x * blockDim.x + threadIdx.x;
     RenderTile renderTile = *tile;
     uint32_t tilePixelCount = renderTile.width * renderTile.height;
@@ -20,7 +20,9 @@ void generatePrimaryRays(RayQueue queue, PathState* pathStates, Camera camera, u
     uint32_t y = renderTile.y + localPixel / renderTile.width;
     uint32_t pixel = y * width + x;
 
-    uint32_t rngState = makeRngSeed(pixel ^ (*sampleIndex * 0x9e3779b9u));
+    RngState rngState = makeRngState(
+        pixelRngKey(pixel, *sampleIndex, rngStrategy),
+        rngStrategy);
 
     float u = (static_cast<float>(x) + randomFloat(rngState)) / static_cast<float>(width);
     float v = (static_cast<float>(y) + randomFloat(rngState)) / static_cast<float>(height);
@@ -48,7 +50,7 @@ void advanceSampleIndex(uint32_t* sampleIndex, const RenderTile* tile) {
 #include "renderer/device_path_shading.cuh"
 
 __global__
-void persistentWavefrontTrace(RayQueue initialRays, RayQueue secondaryRays, PathState* pathStates, uint32_t* queueCounts, Camera camera, uint32_t width, uint32_t height, const uint32_t* sampleIndex, const RenderTile* tile, Scene scene, uint32_t maxDepth, uint32_t russianRouletteStartDepth, bool intersectionDebug, bool shadingNormalDebug, Vec3* framebuffer, PhotonGrid photonGrid, float photonGatherRadius) {
+void persistentWavefrontTrace(RayQueue initialRays, RayQueue secondaryRays, PathState* pathStates, uint32_t* queueCounts, Camera camera, uint32_t width, uint32_t height, const uint32_t* sampleIndex, const RenderTile* tile, RngStrategy rngStrategy, Scene scene, uint32_t maxDepth, uint32_t russianRouletteStartDepth, bool intersectionDebug, bool shadingNormalDebug, Vec3* framebuffer, PhotonGrid photonGrid, float photonGatherRadius) {
     cg::grid_group grid = cg::this_grid();
     uint32_t workerIndex = blockIdx.x * blockDim.x + threadIdx.x;
     uint32_t workerCount = gridDim.x * blockDim.x;
@@ -61,7 +63,9 @@ void persistentWavefrontTrace(RayQueue initialRays, RayQueue secondaryRays, Path
         uint32_t x = renderTile.x + localPixel % renderTile.width;
         uint32_t y = renderTile.y + localPixel / renderTile.width;
         uint32_t pixel = y * width + x;
-        uint32_t rngState = makeRngSeed(pixel ^ (*sampleIndex * 0x9e3779b9u));
+        RngState rngState = makeRngState(
+            pixelRngKey(pixel, *sampleIndex, rngStrategy),
+            rngStrategy);
         float u = (static_cast<float>(x) + randomFloat(rngState)) / static_cast<float>(width);
         float v = (static_cast<float>(y) + randomFloat(rngState)) / static_cast<float>(height);
         Ray ray = camera.generateRay(u, v);

@@ -142,3 +142,15 @@ target_include_directories(queue_compaction_tests
 
 target_link_libraries(queue_compaction_tests PRIVATE CUDA::cudart stdc++fs)
 add_test(NAME queue_compaction_tests COMMAND queue_compaction_tests)
+
+add_executable(rng_tests
+    rng_tests.cu
+)
+
+target_include_directories(rng_tests
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+
+target_link_libraries(rng_tests PRIVATE CUDA::cudart)
+add_test(NAME rng_tests COMMAND rng_tests)

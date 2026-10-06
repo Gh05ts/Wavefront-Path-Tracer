@@ -4,7 +4,7 @@
 // inline the hot path without cross-translation-unit device-call overhead.
 
 __device__
-Vec3 sampleCosineHemisphere(const Vec3& normal, uint32_t& rngState) {
+Vec3 sampleCosineHemisphere(const Vec3& normal, RngState& rngState) {
     constexpr float twoPi = 6.28318530718f;
 
     float u1 = randomFloat(rngState);
@@ -25,7 +25,7 @@ Vec3 sampleCosineHemisphere(const Vec3& normal, uint32_t& rngState) {
 }
 
 __device__
-Vec3 randomInUnitSphere(uint32_t& rngState) {
+Vec3 randomInUnitSphere(RngState& rngState) {
     while (true) {
         Vec3 point(2.0f * randomFloat(rngState) - 1.0f, 2.0f * randomFloat(rngState) - 1.0f, 2.0f * randomFloat(rngState) - 1.0f);
 

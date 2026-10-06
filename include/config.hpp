@@ -2,15 +2,11 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "core/rng_types.hpp"
 #include "scene/scene.cuh"
 
 enum class ScenePreset { Sponza, Cornell, Hurricane, Prism, Crystal, Deer, Demo, RtWeek };
 enum class DistributedRole { Local, Coordinator, Worker };
-
-enum class RngStrategy : uint32_t {
-    XorShift32 = 0, // current behavior
-    Pcg32 = 1
-};
 
 struct RenderConfig {
     uint32_t width = 1920, height = 1080, tileWidth = 960, tileHeight = 540;

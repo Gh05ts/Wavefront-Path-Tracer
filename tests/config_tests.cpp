@@ -51,10 +51,14 @@ int main() {
     char arg3[] = "--caustics";
     char arg4[] = "--no-caustic-gather";
     char arg5[] = "--persistent-wavefront";
-    char* argv[] = {arg0, arg1, arg2, arg3, arg4, arg5};
+    char arg6[] = "--rng";
+    char arg7[] = "pcg32";
+    char* argv[] = {arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7};
     valid &= check(parseCommandLine(static_cast<int>(sizeof(argv) / sizeof(argv[0])), argv, render, scene), "valid command line was rejected");
     valid &= check(scene.preset == ScenePreset::Crystal, "command line scene did not update the preset");
-    valid &= check(render.enableCaustics && !render.enableCausticGather && render.persistentWavefront, "command line flags did not update render configuration");
+    valid &= check(render.enableCaustics && !render.enableCausticGather && render.persistentWavefront &&
+        render.rngStrategy == RngStrategy::Pcg32,
+        "command line flags did not update render configuration");
 
     RenderConfig coordinatorRender;
     SceneConfig coordinatorScene = scenePreset(ScenePreset::Demo);
@@ -126,6 +130,9 @@ int main() {
     valid &= check(firstFingerprint == computeRenderFingerprint(fingerprintRender, fingerprintScene), "fingerprint is not stable");
     fingerprintRender.maxDepth += 1;
     valid &= check(firstFingerprint != computeRenderFingerprint(fingerprintRender, fingerprintScene), "render configuration change did not change fingerprint");
+    fingerprintRender.maxDepth -= 1;
+    fingerprintRender.rngStrategy = RngStrategy::Pcg32;
+    valid &= check(firstFingerprint != computeRenderFingerprint(fingerprintRender, fingerprintScene), "RNG strategy change did not change fingerprint");
 
     return valid ? 0 : 1;
 }

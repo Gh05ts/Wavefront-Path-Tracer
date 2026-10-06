@@ -4,6 +4,7 @@
 
 #include "../core/ray.cuh"
 #include "../scene/geometry.cuh"
+#include "../core/rng.cuh"
 
 struct RayWorkItem {
     Ray ray;
@@ -14,7 +15,7 @@ struct Photon {
     Vec3 position;
     Vec3 direction;
     Vec3 flux;
-    uint32_t rngState;
+    RngState rngState;
     uint32_t specularBounces;
     uint32_t spectralChannel;
     bool valid;

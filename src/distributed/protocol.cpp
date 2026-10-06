@@ -231,6 +231,7 @@ void appendWorkerConfiguration(Writer& writer, const DistributedWorkerConfigurat
     writer.u32(configuration.tileWidth); writer.u32(configuration.tileHeight);
     writer.u32(configuration.maxDepth); writer.u32(configuration.russianRouletteStartDepth);
     writer.u32(configuration.samplesPerPixel); writer.u32(configuration.blockSize);
+    writer.u32(static_cast<uint32_t>(configuration.rngStrategy));
     appendBool(configuration.tiledRendering); appendBool(configuration.intersectionDebug);
     appendBool(configuration.shadingNormalDebug); appendBool(configuration.persistentWavefront);
     appendBool(configuration.profileQueues); appendBool(configuration.enableCaustics);
@@ -267,10 +268,12 @@ bool readWorkerConfiguration(Reader& reader, DistributedWorkerConfiguration& con
     uint32_t lightProfile = 0;
     uint32_t acceleration = 0;
     uint32_t materialOverride = 0;
+    uint32_t rngStrategy = 0;
     if (!reader.u32(configuration.width) || !reader.u32(configuration.height) ||
         !reader.u32(configuration.tileWidth) || !reader.u32(configuration.tileHeight) ||
         !reader.u32(configuration.maxDepth) || !reader.u32(configuration.russianRouletteStartDepth) ||
-        !reader.u32(configuration.samplesPerPixel) || !reader.u32(configuration.blockSize))
+        !reader.u32(configuration.samplesPerPixel) || !reader.u32(configuration.blockSize) ||
+        !reader.u32(rngStrategy))
         return false;
     if (!readBool(configuration.tiledRendering) || !readBool(configuration.intersectionDebug) ||
         !readBool(configuration.shadingNormalDebug) || !readBool(configuration.persistentWavefront) ||
@@ -293,9 +296,11 @@ bool readWorkerConfiguration(Reader& reader, DistributedWorkerConfiguration& con
         !readBool(scene.addSponzaTopLight) || !readBool(scene.ignoreSponzaLightOcclusion) ||
         !readBool(scene.useNormalMaps) || !reader.float32(scene.normalMapMinimumCosine))
         return false;
-    if (preset > static_cast<uint32_t>(ScenePreset::RtWeek) || objectSource > 2 ||
+    if (rngStrategy > static_cast<uint32_t>(RngStrategy::Pcg32) ||
+        preset > static_cast<uint32_t>(ScenePreset::RtWeek) || objectSource > 2 ||
         lightProfile > 2 || acceleration > 4)
         return false;
+    configuration.rngStrategy = static_cast<RngStrategy>(rngStrategy);
     scene.preset = static_cast<ScenePreset>(preset);
     scene.objectSource = static_cast<CornellObjectSource>(objectSource);
     scene.lightProfile = static_cast<CornellLightProfile>(lightProfile);

@@ -212,7 +212,7 @@ void RenderDriver::buildPhotonMap() {
     uint32_t photonBlockCount = (config_.causticPhotonCount + config_.blockSize - 1) / config_.blockSize;
     bool spectralSampling = sceneConfig_.preset == ScenePreset::Prism || sceneConfig_.preset == ScenePreset::Crystal;
 
-    emitPhotons<<<photonBlockCount, config_.blockSize>>>(resources_.photonQueue, deviceScene_.scene, config_.causticPhotonCount, 0x13579bdfu, spectralSampling);
+    emitPhotons<<<photonBlockCount, config_.blockSize>>>(resources_.photonQueue, deviceScene_.scene, config_.causticPhotonCount, 0x13579bdfu, config_.rngStrategy, spectralSampling);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
     auto photonEmitEnd = std::chrono::steady_clock::now();
@@ -288,7 +288,8 @@ void RenderDriver::createWavefrontGraph() {
     CUDA_CHECK(cudaMemsetAsync(resources_.deviceRayCount, 0, sizeof(uint32_t), resources_.traceStream));
     generatePrimaryRays<<<blockCount_, config_.blockSize, 0, resources_.traceStream>>>(
         resources_.rayQueue, resources_.devicePathStates, camera_, width_, height_,
-        resources_.renderSession.deviceSampleIndex, resources_.deviceRenderTile);
+        resources_.renderSession.deviceSampleIndex, resources_.deviceRenderTile,
+        config_.rngStrategy);
 
     RayQueue currentRayQueue = resources_.rayQueue;
     RayQueue nextRays = resources_.nextRayQueue;
@@ -328,6 +329,7 @@ void RenderDriver::launchPersistentTile(const RenderTile& renderTile) {
     uint32_t renderHeight = height_;
     const uint32_t* renderSampleIndex = resources_.renderSession.deviceSampleIndex;
     RenderTile* renderTilePointer = resources_.deviceRenderTile;
+    RngStrategy renderRngStrategy = config_.rngStrategy;
     Scene renderScene = deviceScene_.scene;
     uint32_t renderMaxDepth = config_.maxDepth;
     uint32_t renderRussianRouletteStartDepth = config_.russianRouletteStartDepth;
@@ -346,6 +348,7 @@ void RenderDriver::launchPersistentTile(const RenderTile& renderTile) {
         &renderHeight,
         &renderSampleIndex,
         &renderTilePointer,
+        &renderRngStrategy,
         &renderScene,
         &renderMaxDepth,
         &renderRussianRouletteStartDepth,
