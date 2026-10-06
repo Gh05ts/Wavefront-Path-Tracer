@@ -24,15 +24,20 @@ void writeDistributedImage(
     const DistributedCheckpoint& checkpoint) {
     std::vector<Vec3> pixels(checkpoint.accumulatedRadiance.size());
     for (size_t i = 0; i < pixels.size(); ++i) {
-        const uint32_t samples = checkpoint.sampleCounts[i];
-        if (samples == 0)
-            continue;
-        const float inverseSamples = 1.0f / static_cast<float>(samples);
         pixels[i] = Vec3(
-            checkpoint.accumulatedRadiance[i].x * inverseSamples,
-            checkpoint.accumulatedRadiance[i].y * inverseSamples,
-            checkpoint.accumulatedRadiance[i].z * inverseSamples);
+            checkpoint.accumulatedRadiance[i].x,
+            checkpoint.accumulatedRadiance[i].y,
+            checkpoint.accumulatedRadiance[i].z);
     }
+
+    std::cout << "Raw framebuffer SHA-256: " << sha256Framebuffer(pixels) << '\n';
+
+    for (size_t i = 0; i < pixels.size(); ++i) {
+        const uint32_t samples = checkpoint.sampleCounts[i];
+        if (samples != 0)
+            pixels[i] = pixels[i] / static_cast<float>(samples);
+    }
+
     writePpm(filename, pixels, checkpoint.job.width, checkpoint.job.height);
     std::cout << "Wrote " << filename << '\n';
 }
