@@ -12,8 +12,14 @@ void generatePrimaryRays(RayQueue queue, PathState* pathStates, Camera camera, u
     uint32_t localPixel = blockIdx.x * blockDim.x + threadIdx.x;
     RenderTile renderTile = *tile;
     uint32_t tilePixelCount = renderTile.width * renderTile.height;
+    uint32_t rayCount = min(tilePixelCount, queue.capacity);
 
-    if (localPixel >= tilePixelCount)
+    // Primary rays have one predetermined slot per tile pixel. The next
+    // kernel in the stream observes this count after all ray writes finish.
+    if (localPixel == 0)
+        *queue.count = rayCount;
+
+    if (localPixel >= rayCount)
         return;
 
     uint32_t x = renderTile.x + localPixel % renderTile.width;
@@ -31,12 +37,7 @@ void generatePrimaryRays(RayQueue queue, PathState* pathStates, Camera camera, u
 
     pathStates[localPixel] = PathState{ray, Vec3(1.0f, 1.0f, 1.0f), Vec3(0.0f, 0.0f, 0.0f), pixel, 0, rngState, 0xffffffffu, 1.0f, 0.0f, true, true};
 
-    uint32_t outputIndex = atomicAdd(queue.count, 1);
-
-    if (outputIndex >= queue.capacity)
-        return;
-
-    queue.items[outputIndex] = RayWorkItem{ray, localPixel};
+    queue.items[localPixel] = RayWorkItem{ray, localPixel};
 }
 
 __global__

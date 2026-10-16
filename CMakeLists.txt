@@ -20,8 +20,7 @@ set(NEXUSBVH_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(NEXUSBVH_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory(extern/NexusBVH)
 
-add_executable(pathtracer
-    src/main.cu
+set(PATHTRACER_SOURCES
     src/config.cpp
     src/scene/scene_manifest.cpp
     src/core/rng.cu
@@ -54,25 +53,32 @@ add_executable(pathtracer
     src/distributed/worker_app.cu
 )
 
-target_include_directories(pathtracer
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/extern/tinyobjloader
-        ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
-        ${CMAKE_CURRENT_SOURCE_DIR}/extern/tinygltf
-)
+add_executable(pathtracer src/main.cu ${PATHTRACER_SOURCES})
+set(BENCHMARK_SOURCES ${PATHTRACER_SOURCES})
+list(FILTER BENCHMARK_SOURCES EXCLUDE REGEX "src/distributed/")
+add_executable(render_benchmark EXCLUDE_FROM_ALL benchmarks/render_benchmark.cpp ${BENCHMARK_SOURCES})
 
-target_link_libraries(pathtracer
-    PRIVATE
-        NXB::NexusBVH
-        CUDA::cudart
-        OpenSSL::Crypto
-        stdc++fs
-)
+foreach(renderer_target IN ITEMS pathtracer render_benchmark)
+    target_include_directories(${renderer_target}
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/extern/tinyobjloader
+            ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
+            ${CMAKE_CURRENT_SOURCE_DIR}/extern/tinygltf
+    )
 
-set_target_properties(pathtracer PROPERTIES
-    CUDA_SEPARABLE_COMPILATION ON
-)
+    target_link_libraries(${renderer_target}
+        PRIVATE
+            NXB::NexusBVH
+            CUDA::cudart
+            OpenSSL::Crypto
+            stdc++fs
+    )
+
+    set_target_properties(${renderer_target} PROPERTIES
+        CUDA_SEPARABLE_COMPILATION ON
+    )
+endforeach()
 
 if(BUILD_TESTING)
     add_subdirectory(tests)

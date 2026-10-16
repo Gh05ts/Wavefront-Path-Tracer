@@ -15,6 +15,7 @@ struct TraceHitState {
     Vec3 closestTangent1;
     Vec3 closestBitangent1;
     uint32_t closestLightIndex = invalidLightIndex;
+    uint32_t closestSphereIndex = 0xffffffffu;
 };
 
 __device__
@@ -123,7 +124,7 @@ __device__
 float getMaterialOpacity(const Material& material, const Vec2& uv, const Vec2& uv1, Scene scene);
 
 __device__
-bool intersectTriangleHit(const Ray& ray, const Triangle& triangle, Scene scene, float& closestT, int& closestMaterial, Vec3& closestGeometricNormal, Vec3& closestNormal, Vec2& closestUv, Vec2& closestUv1, Vec3& closestTangent, Vec3& closestBitangent, Vec3& closestTangent1, Vec3& closestBitangent1, uint32_t& closestLightIndex) {
+bool intersectTriangleHit(const Ray& ray, const Triangle& triangle, Scene scene, float& closestT, int& closestMaterial, Vec3& closestGeometricNormal, Vec3& closestNormal, Vec2& closestUv, Vec2& closestUv1, Vec3& closestTangent, Vec3& closestBitangent, Vec3& closestTangent1, Vec3& closestBitangent1, uint32_t& closestLightIndex, uint32_t materialOverride = invalidMaterialIndex) {
     float t;
     float u;
     float v;
@@ -134,11 +135,12 @@ bool intersectTriangleHit(const Ray& ray, const Triangle& triangle, Scene scene,
     Vec2 uv = getTriangleUv(triangle, u, v, false);
     Vec2 uv1 = getTriangleUv(triangle, u, v, true);
 
-    if (scene.materials[triangle.material].alphaMasked && getMaterialOpacity(scene.materials[triangle.material], uv, uv1, scene) < scene.materials[triangle.material].alphaCutoff)
+    uint32_t materialIndex = materialOverride == invalidMaterialIndex ? triangle.material : materialOverride;
+    if (scene.materials[materialIndex].alphaMasked && getMaterialOpacity(scene.materials[materialIndex], uv, uv1, scene) < scene.materials[materialIndex].alphaCutoff)
         return false;
 
     closestT = t;
-    closestMaterial = static_cast<int>(triangle.material);
+    closestMaterial = static_cast<int>(materialIndex);
     closestGeometricNormal = getTriangleGeometricNormal(triangle, ray);
     closestNormal = getTriangleNormal(triangle, ray, u, v);
     closestUv = uv;
@@ -162,7 +164,7 @@ bool intersectTriangleHit(const Ray& ray, const Triangle& triangle, Scene scene,
     }
     closestTangent1 = triangle.tangent1;
     closestBitangent1 = triangle.bitangent1;
-    closestLightIndex = triangle.lightIndex;
+    closestLightIndex = materialOverride == invalidMaterialIndex ? triangle.lightIndex : invalidLightIndex;
     return true;
 }
 
@@ -200,6 +202,14 @@ bool intersectNexusAabb(const Ray& ray, const NXB::AABB& bounds, float closestT,
         closestT, nearT);
 }
 
+__device__ __forceinline__
+bool intersectNexusAabb(const Ray& ray, const Vec3& inverseDirection, const NXB::AABB& bounds, float closestT, float& nearT) {
+    return intersectAabb(ray, inverseDirection,
+        bounds.bMin.x, bounds.bMin.y, bounds.bMin.z,
+        bounds.bMax.x, bounds.bMax.y, bounds.bMax.z,
+        closestT, nearT);
+}
+
 __device__
 bool intersectNexusBvh8ChildAabb(const Ray& ray, const Vec3& inverseDirection, const NXB::BVH8::NodeExplicit& node, const Vec3& cellSize, uint32_t slot, float closestT, float& nearT) {
     float minimumX = node.p.x + static_cast<float>(node.qlox[slot]) * cellSize.x;
@@ -217,6 +227,7 @@ bool intersectNexusBvh8ChildAabb(const Ray& ray, const Vec3& inverseDirection, c
 
 __device__
 void intersectNexusBvh2(const Ray& ray, const Triangle* triangles, const NXB::BVH2::DeviceView& bvh, Scene scene, float& closestT, int& closestMaterial, Vec3& closestGeometricNormal, Vec3& closestNormal, Vec2& closestUv, Vec2& closestUv1, Vec3& closestTangent, Vec3& closestBitangent, Vec3& closestTangent1, Vec3& closestBitangent1, uint32_t& closestLightIndex, uint32_t materialOverride = invalidMaterialIndex) {
+    Vec3 inverseDirection(1.0f / ray.direction.x, 1.0f / ray.direction.y, 1.0f / ray.direction.z);
     constexpr uint32_t maxBvhStackSize = 64;
     uint32_t stack[maxBvhStackSize];
     uint32_t stackSize = 1;
@@ -226,7 +237,7 @@ void intersectNexusBvh2(const Ray& ray, const Triangle* triangles, const NXB::BV
         const NXB::BVH2::Node& node = bvh.nodes[stack[--stackSize]];
         float nearT;
 
-        if (!intersectNexusAabb(ray, node.bounds, closestT, nearT))
+        if (!intersectNexusAabb(ray, inverseDirection, node.bounds, closestT, nearT))
             continue;
 
         if (node.leftChild == NXB::InvalidIdx) {
@@ -273,8 +284,8 @@ void intersectNexusBvh2(const Ray& ray, const Triangle* triangles, const NXB::BV
         } else {
             float leftNearT;
             float rightNearT;
-            bool hitLeft = intersectNexusAabb(ray, bvh.nodes[node.leftChild].bounds, closestT, leftNearT);
-            bool hitRight = intersectNexusAabb(ray, bvh.nodes[node.rightChild].bounds, closestT, rightNearT);
+            bool hitLeft = intersectNexusAabb(ray, inverseDirection, bvh.nodes[node.leftChild].bounds, closestT, leftNearT);
+            bool hitRight = intersectNexusAabb(ray, inverseDirection, bvh.nodes[node.rightChild].bounds, closestT, rightNearT);
 
             if (hitLeft && hitRight) {
                 uint32_t nearChild = leftNearT < rightNearT ? node.leftChild : node.rightChild;
@@ -291,78 +302,7 @@ void intersectNexusBvh2(const Ray& ray, const Triangle* triangles, const NXB::BV
 }
 
 __device__
-bool isOccluded(const Ray& ray, float maximumDistance, Scene scene) {
-    for (uint32_t i = 0; i < scene.sphereCount; ++i) {
-        float t;
-
-        if (intersectSphere(ray, scene.spheres[i], t) && t < maximumDistance)
-            return true;
-    }
-
-    for (uint32_t i = 0; i < scene.staticTriangleCount; ++i) {
-        float t;
-
-        if (intersectTriangle(ray, scene.staticTriangles[i], t) && t < maximumDistance)
-            return true;
-    }
-
-    if (scene.tlas.nodes != nullptr) {
-        constexpr uint32_t maxTlasStackSize = 64;
-        uint32_t stack[maxTlasStackSize];
-        uint32_t stackSize = 1;
-        stack[0] = scene.tlas.nodeCount - 1;
-
-        while (stackSize > 0) {
-            const NXB::BVH2::Node& node = scene.tlas.nodes[stack[--stackSize]];
-            float nearT;
-
-            if (!intersectNexusAabb(ray, node.bounds, maximumDistance, nearT))
-                continue;
-
-            if (node.leftChild == NXB::InvalidIdx) {
-                const MeshInstance& instance = scene.instances[node.rightChild];
-                const Blas& blas = scene.blases[instance.blasIndex];
-                Ray localRay;
-                localRay.origin = inverseTransformVector(instance.transform, ray.origin - instance.transform.translation);
-                localRay.direction = inverseTransformVector(instance.transform, ray.direction);
-
-                float closestT = maximumDistance;
-                int closestMaterial = -1;
-                Vec3 closestGeometricNormal;
-                Vec3 closestNormal;
-                Vec2 closestUv;
-                Vec2 closestUv1;
-                Vec3 closestTangent;
-                Vec3 closestBitangent;
-                Vec3 closestTangent1;
-                Vec3 closestBitangent1;
-                uint32_t closestLightIndex;
-                intersectNexusBvh2(localRay, blas.triangles, blas.bvh, scene, closestT, closestMaterial, closestGeometricNormal, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex, instance.materialOverride);
-
-                if (closestMaterial >= 0)
-                    return true;
-            } else {
-                float leftNearT;
-                float rightNearT;
-                bool hitLeft = intersectNexusAabb(ray, scene.tlas.nodes[node.leftChild].bounds, maximumDistance, leftNearT);
-                bool hitRight = intersectNexusAabb(ray, scene.tlas.nodes[node.rightChild].bounds, maximumDistance, rightNearT);
-
-                if (hitLeft && hitRight) {
-                    uint32_t nearChild = leftNearT < rightNearT ? node.leftChild : node.rightChild;
-                    uint32_t farChild = leftNearT < rightNearT ? node.rightChild : node.leftChild;
-                    stack[stackSize++] = farChild;
-                    stack[stackSize++] = nearChild;
-                } else if (hitLeft) {
-                    stack[stackSize++] = node.leftChild;
-                } else if (hitRight) {
-                    stack[stackSize++] = node.rightChild;
-                }
-            }
-        }
-    }
-
-    return false;
-}
+bool isOccluded(const Ray& ray, float maximumDistance, Scene scene);
 
 __device__
 float powerHeuristic(float firstPdf, float secondPdf) {
@@ -528,43 +468,57 @@ void sampleDirectLight(PathState& path, const Hit& hit, const Hit& shadedHit, co
     path.radiance += hadamard(path.throughput, directLighting);
 }
 
-__device__ __forceinline__ TraceResult traceRay(const Ray& ray, Scene scene) {
-    RayWorkItem work{ray, 0};
+__device__ __forceinline__
+void intersectSphereHit(const Ray& ray, const Sphere& sphere, uint32_t sphereIndex, TraceHitState& hitState) {
+    float t;
+    if (!intersectSphere(ray, sphere, t) || t > hitState.closestT)
+        return;
+    // Preserve the old sphere-array ordering for exactly coincident hits.
+    if (t == hitState.closestT && sphereIndex >= hitState.closestSphereIndex)
+        return;
+    hitState.closestT = t;
+    hitState.closestMaterial = static_cast<int>(sphere.material);
+    hitState.closestSphereIndex = sphereIndex;
+}
 
-    TraceHitState hitState;
-    float& closestT = hitState.closestT;
-    int& closestMaterial = hitState.closestMaterial;
-    Vec3& closestGeometricNormal = hitState.closestGeometricNormal;
-    Vec3& closestNormal = hitState.closestNormal;
-    Vec2& closestUv = hitState.closestUv;
-    Vec2& closestUv1 = hitState.closestUv1;
-    Vec3& closestTangent = hitState.closestTangent;
-    Vec3& closestBitangent = hitState.closestBitangent;
-    Vec3& closestTangent1 = hitState.closestTangent1;
-    Vec3& closestBitangent1 = hitState.closestBitangent1;
-    uint32_t& closestLightIndex = hitState.closestLightIndex;
-    for (uint32_t i = 0; i < scene.sphereCount; ++i) {
-        float t;
-
-        if (intersectSphere(work.ray, scene.spheres[i], t)) {
-            if (t < closestT) {
-                closestT = t;
-                closestMaterial = static_cast<int>(scene.spheres[i].material);
-
-                Vec3 position = work.ray.at(t);
-
-                closestNormal = normalize(position - scene.spheres[i].center);
-                closestGeometricNormal = closestNormal;
-                closestLightIndex = invalidLightIndex;
-            }
+__device__ __forceinline__
+void intersectMeshInstance(const Ray& ray, uint32_t instanceIndex, Scene scene, TraceHitState& hitState, bool useBvh) {
+    const MeshInstance& instance = scene.instances[instanceIndex];
+    const Blas& blas = scene.blases[instance.blasIndex];
+    Ray localRay;
+    localRay.origin = inverseTransformVector(instance.transform, ray.origin - instance.transform.translation);
+    localRay.direction = inverseTransformVector(instance.transform, ray.direction);
+    float previousClosestT = hitState.closestT;
+    if (useBvh && blas.bvh.nodes != nullptr) {
+        intersectNexusBvh2(localRay, blas.triangles, blas.bvh, scene, hitState.closestT,
+            hitState.closestMaterial, hitState.closestGeometricNormal, hitState.closestNormal,
+            hitState.closestUv, hitState.closestUv1, hitState.closestTangent, hitState.closestBitangent,
+            hitState.closestTangent1, hitState.closestBitangent1, hitState.closestLightIndex, instance.materialOverride);
+    } else {
+        for (uint32_t i = 0; i < blas.triangleCount; ++i) {
+            intersectTriangleHit(localRay, blas.triangles[i], scene, hitState.closestT,
+                hitState.closestMaterial, hitState.closestGeometricNormal, hitState.closestNormal,
+                hitState.closestUv, hitState.closestUv1, hitState.closestTangent, hitState.closestBitangent,
+                hitState.closestTangent1, hitState.closestBitangent1, hitState.closestLightIndex, instance.materialOverride);
         }
     }
+    if (hitState.closestT >= previousClosestT)
+        return;
+    hitState.closestGeometricNormal = transformNormal(instance.transform, hitState.closestGeometricNormal);
+    hitState.closestNormal = transformNormal(instance.transform, hitState.closestNormal);
+    hitState.closestTangent = normalize(transformVector(instance.transform, hitState.closestTangent));
+    hitState.closestBitangent = normalize(transformVector(instance.transform, hitState.closestBitangent));
+    hitState.closestTangent1 = normalize(transformVector(instance.transform, hitState.closestTangent1));
+    hitState.closestBitangent1 = normalize(transformVector(instance.transform, hitState.closestBitangent1));
+    if (hitState.closestLightIndex != invalidLightIndex)
+        hitState.closestLightIndex += instance.lightOffset;
+    hitState.closestSphereIndex = 0xffffffffu;
+}
 
-    for (uint32_t i = 0; i < scene.staticTriangleCount; ++i) {
-        const Triangle& triangle = scene.staticTriangles[i];
-        intersectTriangleHit(work.ray, triangle, scene, closestT, closestMaterial, closestGeometricNormal, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
-    }
-
+__device__ __forceinline__
+void intersectSceneTlas(const Ray& ray, Scene scene, TraceHitState& hitState) {
+    Vec3 inverseDirection(1.0f / ray.direction.x, 1.0f / ray.direction.y, 1.0f / ray.direction.z);
+    float& closestT = hitState.closestT;
     if (scene.tlas.nodes != nullptr) {
         constexpr uint32_t maxTlasStackSize = 64;
         uint32_t stack[maxTlasStackSize];
@@ -575,46 +529,20 @@ __device__ __forceinline__ TraceResult traceRay(const Ray& ray, Scene scene) {
             const NXB::BVH2::Node& node = scene.tlas.nodes[stack[--stackSize]];
             float nearT;
 
-            if (!intersectNexusAabb(work.ray, node.bounds, closestT, nearT))
+            if (!intersectNexusAabb(ray, inverseDirection, node.bounds, closestT, nearT))
                 continue;
 
             if (node.leftChild == NXB::InvalidIdx) {
-                const MeshInstance& instance = scene.instances[node.rightChild];
-                const Blas& blas = scene.blases[instance.blasIndex];
-                Ray localRay;
-                localRay.origin = inverseTransformVector(instance.transform, work.ray.origin - instance.transform.translation);
-                localRay.direction = inverseTransformVector(instance.transform, work.ray.direction);
-                float instanceClosestT = closestT;
-                int instanceMaterial = -1;
-                Vec3 instanceGeometricNormal;
-                Vec3 instanceNormal;
-                Vec2 instanceUv;
-                Vec2 instanceUv1;
-                Vec3 instanceTangent;
-                Vec3 instanceBitangent;
-                Vec3 instanceTangent1;
-                Vec3 instanceBitangent1;
-                uint32_t instanceLightIndex = invalidLightIndex;
-                intersectNexusBvh2(localRay, blas.triangles, blas.bvh, scene, instanceClosestT, instanceMaterial, instanceGeometricNormal, instanceNormal, instanceUv, instanceUv1, instanceTangent, instanceBitangent, instanceTangent1, instanceBitangent1, instanceLightIndex, instance.materialOverride);
-
-                if (instanceMaterial >= 0) {
-                    closestT = instanceClosestT;
-                    closestMaterial = instanceMaterial;
-                    closestGeometricNormal = transformNormal(instance.transform, instanceGeometricNormal);
-                    closestNormal = transformNormal(instance.transform, instanceNormal);
-                    closestUv = instanceUv;
-                    closestUv1 = instanceUv1;
-                    closestTangent = normalize(transformVector(instance.transform, instanceTangent));
-                    closestBitangent = normalize(transformVector(instance.transform, instanceBitangent));
-                    closestTangent1 = normalize(transformVector(instance.transform, instanceTangent1));
-                    closestBitangent1 = normalize(transformVector(instance.transform, instanceBitangent1));
-                    closestLightIndex = instanceLightIndex == invalidLightIndex ? invalidLightIndex : instance.lightOffset + instanceLightIndex;
-                }
+                const SceneLeaf& leaf = scene.sceneLeaves[node.rightChild];
+                if (leaf.type == SceneLeafType::Sphere)
+                    intersectSphereHit(ray, scene.spheres[leaf.index], leaf.index, hitState);
+                else
+                    intersectMeshInstance(ray, leaf.index, scene, hitState, true);
             } else {
                 float leftNearT;
                 float rightNearT;
-                bool hitLeft = intersectNexusAabb(work.ray, scene.tlas.nodes[node.leftChild].bounds, closestT, leftNearT);
-                bool hitRight = intersectNexusAabb(work.ray, scene.tlas.nodes[node.rightChild].bounds, closestT, rightNearT);
+                bool hitLeft = intersectNexusAabb(ray, inverseDirection, scene.tlas.nodes[node.leftChild].bounds, closestT, leftNearT);
+                bool hitRight = intersectNexusAabb(ray, inverseDirection, scene.tlas.nodes[node.rightChild].bounds, closestT, rightNearT);
 
                 if (hitLeft && hitRight) {
                     uint32_t nearChild = leftNearT < rightNearT ? node.leftChild : node.rightChild;
@@ -628,7 +556,23 @@ __device__ __forceinline__ TraceResult traceRay(const Ray& ray, Scene scene) {
                 }
             }
         }
-    } else if (scene.nexusBvh8.nodes != nullptr) {
+    }
+}
+
+__device__ __forceinline__
+void intersectDirectTriangles(const Ray& ray, Scene scene, TraceHitState& hitState) {
+    float& closestT = hitState.closestT;
+    int& closestMaterial = hitState.closestMaterial;
+    Vec3& closestGeometricNormal = hitState.closestGeometricNormal;
+    Vec3& closestNormal = hitState.closestNormal;
+    Vec2& closestUv = hitState.closestUv;
+    Vec2& closestUv1 = hitState.closestUv1;
+    Vec3& closestTangent = hitState.closestTangent;
+    Vec3& closestBitangent = hitState.closestBitangent;
+    Vec3& closestTangent1 = hitState.closestTangent1;
+    Vec3& closestBitangent1 = hitState.closestBitangent1;
+    uint32_t& closestLightIndex = hitState.closestLightIndex;
+    if (scene.nexusBvh8.nodes != nullptr) {
         constexpr uint32_t maxBvhStackSize = 96;
         struct StackEntry {
             uint32_t index;
@@ -637,7 +581,7 @@ __device__ __forceinline__ TraceResult traceRay(const Ray& ray, Scene scene) {
         StackEntry stack[maxBvhStackSize];
         uint32_t stackSize = 1;
         stack[0] = StackEntry{0, 0};
-        Vec3 inverseDirection(1.0f / work.ray.direction.x, 1.0f / work.ray.direction.y, 1.0f / work.ray.direction.z);
+        Vec3 inverseDirection(1.0f / ray.direction.x, 1.0f / ray.direction.y, 1.0f / ray.direction.z);
 
         while (stackSize > 0) {
             StackEntry entry = stack[--stackSize];
@@ -645,7 +589,7 @@ __device__ __forceinline__ TraceResult traceRay(const Ray& ray, Scene scene) {
             if (entry.triangleCount > 0) {
                 for (uint32_t i = 0; i < entry.triangleCount; ++i) {
                     const Triangle& triangle = scene.triangles[scene.nexusBvh8.primIdx[entry.index + i]];
-                    intersectTriangleHit(work.ray, triangle, scene, closestT, closestMaterial, closestGeometricNormal, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
+                    intersectTriangleHit(ray, triangle, scene, closestT, closestMaterial, closestGeometricNormal, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
                 }
 
                 continue;
@@ -666,7 +610,7 @@ __device__ __forceinline__ TraceResult traceRay(const Ray& ray, Scene scene) {
                     continue;
 
                 float nearT;
-                if (!intersectNexusBvh8ChildAabb(work.ray, inverseDirection, node, cellSize, slot, closestT, nearT))
+                if (!intersectNexusBvh8ChildAabb(ray, inverseDirection, node, cellSize, slot, closestT, nearT))
                     continue;
 
                 StackEntry child;
@@ -703,17 +647,17 @@ __device__ __forceinline__ TraceResult traceRay(const Ray& ray, Scene scene) {
             const NXB::BVH2::Node& node = scene.nexusBvh.nodes[stack[--stackSize]];
             float nearT;
 
-            if (!intersectNexusAabb(work.ray, node.bounds, closestT, nearT))
+            if (!intersectNexusAabb(ray, node.bounds, closestT, nearT))
                 continue;
 
             if (node.leftChild == NXB::InvalidIdx) {
                 const Triangle& triangle = scene.triangles[node.rightChild];
-                intersectTriangleHit(work.ray, triangle, scene, closestT, closestMaterial, closestGeometricNormal, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
+                intersectTriangleHit(ray, triangle, scene, closestT, closestMaterial, closestGeometricNormal, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
             } else {
                 float leftNearT;
                 float rightNearT;
-                bool hitLeft = intersectNexusAabb(work.ray, scene.nexusBvh.nodes[node.leftChild].bounds, closestT, leftNearT);
-                bool hitRight = intersectNexusAabb(work.ray, scene.nexusBvh.nodes[node.rightChild].bounds, closestT, rightNearT);
+                bool hitLeft = intersectNexusAabb(ray, scene.nexusBvh.nodes[node.leftChild].bounds, closestT, leftNearT);
+                bool hitRight = intersectNexusAabb(ray, scene.nexusBvh.nodes[node.rightChild].bounds, closestT, rightNearT);
 
                 if (hitLeft && hitRight) {
                     uint32_t nearChild = leftNearT < rightNearT ? node.leftChild : node.rightChild;
@@ -737,19 +681,19 @@ __device__ __forceinline__ TraceResult traceRay(const Ray& ray, Scene scene) {
             const BvhNode& node = scene.bvhNodes[stack[--stackSize]];
             float nearT;
 
-            if (!intersectAabb(work.ray, node.bounds, closestT, nearT))
+            if (!intersectAabb(ray, node.bounds, closestT, nearT))
                 continue;
 
             if (node.triangleCount > 0) {
                 for (uint32_t i = 0; i < node.triangleCount; ++i) {
                     const Triangle& triangle = scene.triangles[scene.bvhTriangleIndices[node.firstTriangle + i]];
-                    intersectTriangleHit(work.ray, triangle, scene, closestT, closestMaterial, closestGeometricNormal, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
+                    intersectTriangleHit(ray, triangle, scene, closestT, closestMaterial, closestGeometricNormal, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
                 }
             } else {
                 float leftNearT;
                 float rightNearT;
-                bool hitLeft = intersectAabb(work.ray, scene.bvhNodes[node.leftChild].bounds, closestT, leftNearT);
-                bool hitRight = intersectAabb(work.ray, scene.bvhNodes[node.rightChild].bounds, closestT, rightNearT);
+                bool hitLeft = intersectAabb(ray, scene.bvhNodes[node.leftChild].bounds, closestT, leftNearT);
+                bool hitRight = intersectAabb(ray, scene.bvhNodes[node.rightChild].bounds, closestT, rightNearT);
 
                 if (hitLeft && hitRight) {
                     uint32_t nearChild = leftNearT < rightNearT ? node.leftChild : node.rightChild;
@@ -765,8 +709,136 @@ __device__ __forceinline__ TraceResult traceRay(const Ray& ray, Scene scene) {
         }
     } else {
         for (uint32_t i = 0; i < scene.triangleCount; ++i) {
-            intersectTriangleHit(work.ray, scene.triangles[i], scene, closestT, closestMaterial, closestGeometricNormal, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
+            intersectTriangleHit(ray, scene.triangles[i], scene, closestT, closestMaterial, closestGeometricNormal, closestNormal, closestUv, closestUv1, closestTangent, closestBitangent, closestTangent1, closestBitangent1, closestLightIndex);
         }
+    }
+}
+
+__device__
+bool isOccluded(const Ray& ray, float maximumDistance, Scene scene) {
+    for (uint32_t i = 0; i < scene.directSphereCount; ++i) {
+        float t;
+        if (intersectSphere(ray, scene.spheres[scene.directSphereIndices[i]], t) && t < maximumDistance)
+            return true;
+    }
+    for (uint32_t i = 0; i < scene.directInstanceCount; ++i) {
+        TraceHitState instanceHit;
+        instanceHit.closestT = maximumDistance;
+        intersectMeshInstance(ray, scene.directInstanceIndices[i], scene, instanceHit, false);
+        if (instanceHit.closestMaterial >= 0)
+            return true;
+    }
+    for (uint32_t i = 0; i < scene.staticTriangleCount; ++i) {
+        const Triangle& triangle = scene.staticTriangles[i];
+        float t, u, v;
+        if (intersectTriangle(ray, triangle, t, u, v) && t < maximumDistance) {
+            const Material& material = scene.materials[triangle.material];
+            if (!material.alphaMasked || getMaterialOpacity(material,
+                getTriangleUv(triangle, u, v, false), getTriangleUv(triangle, u, v, true), scene) >= material.alphaCutoff)
+                return true;
+        }
+    }
+    if (scene.tlas.nodes != nullptr) {
+        constexpr uint32_t maxTlasStackSize = 64;
+        uint32_t stack[maxTlasStackSize];
+        uint32_t stackSize = 1;
+        stack[0] = scene.tlas.nodeCount - 1;
+
+        while (stackSize > 0) {
+            const NXB::BVH2::Node& node = scene.tlas.nodes[stack[--stackSize]];
+            float nearT;
+
+            if (!intersectNexusAabb(ray, node.bounds, maximumDistance, nearT))
+                continue;
+
+            if (node.leftChild == NXB::InvalidIdx) {
+                const SceneLeaf& leaf = scene.sceneLeaves[node.rightChild];
+                if (leaf.type == SceneLeafType::Sphere) {
+                    float t;
+                    if (intersectSphere(ray, scene.spheres[leaf.index], t) && t < maximumDistance)
+                        return true;
+                } else {
+                    TraceHitState instanceHit;
+                    instanceHit.closestT = maximumDistance;
+                    intersectMeshInstance(ray, leaf.index, scene, instanceHit, true);
+                    if (instanceHit.closestMaterial >= 0)
+                        return true;
+                }
+            } else {
+                float leftNearT;
+                float rightNearT;
+                bool hitLeft = intersectNexusAabb(ray, scene.tlas.nodes[node.leftChild].bounds, maximumDistance, leftNearT);
+                bool hitRight = intersectNexusAabb(ray, scene.tlas.nodes[node.rightChild].bounds, maximumDistance, rightNearT);
+
+                if (hitLeft && hitRight) {
+                    uint32_t nearChild = leftNearT < rightNearT ? node.leftChild : node.rightChild;
+                    uint32_t farChild = leftNearT < rightNearT ? node.rightChild : node.leftChild;
+                    stack[stackSize++] = farChild;
+                    stack[stackSize++] = nearChild;
+                } else if (hitLeft) {
+                    stack[stackSize++] = node.leftChild;
+                } else if (hitRight) {
+                    stack[stackSize++] = node.rightChild;
+                }
+            }
+        }
+    }
+
+    if (scene.triangleCount > 0) {
+        TraceHitState triangleHit;
+        triangleHit.closestT = maximumDistance;
+        intersectDirectTriangles(ray, scene, triangleHit);
+        if (triangleHit.closestMaterial >= 0)
+            return true;
+    }
+    return false;
+}
+
+__device__ __forceinline__ TraceResult traceRay(const Ray& ray, Scene scene) {
+    RayWorkItem work{ray, 0};
+    TraceHitState hitState;
+    float& closestT = hitState.closestT;
+    int& closestMaterial = hitState.closestMaterial;
+    Vec3& closestGeometricNormal = hitState.closestGeometricNormal;
+    Vec3& closestNormal = hitState.closestNormal;
+    Vec2& closestUv = hitState.closestUv;
+    Vec2& closestUv1 = hitState.closestUv1;
+    Vec3& closestTangent = hitState.closestTangent;
+    Vec3& closestBitangent = hitState.closestBitangent;
+    Vec3& closestTangent1 = hitState.closestTangent1;
+    Vec3& closestBitangent1 = hitState.closestBitangent1;
+    uint32_t& closestLightIndex = hitState.closestLightIndex;
+    for (uint32_t i = 0; i < scene.directSphereCount; ++i) {
+        uint32_t sphereIndex = scene.directSphereIndices[i];
+        intersectSphereHit(ray, scene.spheres[sphereIndex], sphereIndex, hitState);
+    }
+    for (uint32_t i = 0; i < scene.directInstanceCount; ++i)
+        intersectMeshInstance(ray, scene.directInstanceIndices[i], scene, hitState, false);
+    for (uint32_t i = 0; i < scene.staticTriangleCount; ++i) {
+        const Triangle& triangle = scene.staticTriangles[i];
+        if (intersectTriangleHit(ray, triangle, scene, closestT, closestMaterial, closestGeometricNormal,
+            closestNormal, closestUv, closestUv1, closestTangent, closestBitangent,
+            closestTangent1, closestBitangent1, closestLightIndex))
+            hitState.closestSphereIndex = 0xffffffffu;
+    }
+    intersectSceneTlas(ray, scene, hitState);
+    // A sphere TLAS may coexist with any of the direct triangle accelerators.
+    if (scene.triangleCount > 0) {
+        float previousClosestT = closestT;
+        intersectDirectTriangles(ray, scene, hitState);
+        if (closestT < previousClosestT)
+            hitState.closestSphereIndex = 0xffffffffu;
+    }
+    // Sphere candidates need only a distance and index during traversal.
+    // Compute shading attributes once, if a sphere is the final winner.
+    if (hitState.closestSphereIndex != 0xffffffffu) {
+        const Sphere& sphere = scene.spheres[hitState.closestSphereIndex];
+        closestNormal = normalize(ray.at(closestT) - sphere.center);
+        closestGeometricNormal = closestNormal;
+        closestUv = closestUv1 = Vec2{0.0f, 0.0f};
+        closestTangent = closestBitangent = Vec3(0.0f, 0.0f, 0.0f);
+        closestTangent1 = closestBitangent1 = Vec3(0.0f, 0.0f, 0.0f);
+        closestLightIndex = invalidLightIndex;
     }
 
     if (closestMaterial < 0) {

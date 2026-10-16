@@ -116,7 +116,7 @@ void requireAssetFilename(const char* filename, const char* sceneName) {
 HostScene assembleDemoScene() {
     HostScene hostScene;
     hostScene.spheres = {
-        Sphere{Vec3(0.0f, -100.5f, 0.0f), 100.0f, 3},
+        SceneSphere{Sphere{Vec3(0.0f, -100.5f, 0.0f), 100.0f, 3}, AccelerationMode::Direct},
         Sphere{Vec3(1.35f, 0.08f, 0.0f), 0.5f, 2}
     };
 
@@ -188,7 +188,7 @@ HostScene assembleRtWeekScene(const char* filename) {
     // The large ground sphere and deterministic small-sphere field follow the
     // Ray Tracing in One Weekend layout, while the fixed seed keeps this scene
     // reproducible for wavefront-vs-baseline comparisons.
-    hostScene.spheres.push_back(Sphere{Vec3(0.0f, -1000.0f, 0.0f), 1000.0f, 0});
+    hostScene.spheres.emplace_back(Sphere{Vec3(0.0f, -1000.0f, 0.0f), 1000.0f, 0}, AccelerationMode::Direct);
     uint32_t randomState = 0x4d595df4u;
     for (int x = -11; x < 11; ++x) {
         for (int z = -11; z < 11; ++z) {
@@ -389,7 +389,7 @@ HostScene assembleObjScene(const ObjSceneOptions& options) {
 
     HostScene hostScene;
     hostScene.acceleration = options.acceleration;
-    hostScene.spheres.push_back(Sphere{Vec3(0.0f, -100.5f, 0.0f), 100.0f, 0});
+    hostScene.spheres.emplace_back(Sphere{Vec3(0.0f, -100.5f, 0.0f), 100.0f, 0}, AccelerationMode::Direct);
     hostScene.materials.push_back(makeMaterial(MaterialType::Diffuse, Vec3(0.75f, 0.75f, 0.75f)));
     hostScene.materials.insert(hostScene.materials.end(), mesh.materials.begin(), mesh.materials.end());
     hostScene.textures = std::move(mesh.textures);
@@ -411,4 +411,24 @@ HostScene assembleObjScene(const ObjSceneOptions& options) {
     }
 
     return hostScene;
+}
+
+DeviceScene createDemoScene() {
+    return uploadScene(assembleDemoScene());
+}
+
+DeviceScene createRtWeekScene(const char* filename) {
+    return uploadScene(assembleRtWeekScene(filename));
+}
+
+DeviceScene createObjScene(const ObjSceneOptions& options) {
+    return uploadScene(assembleObjScene(options));
+}
+
+DeviceScene createCornellScene(const CornellSceneOptions& options) {
+    return uploadScene(assembleCornellScene(options));
+}
+
+DeviceScene createGltfScene(const char* filename, float sceneScale, bool addTopLight) {
+    return uploadScene(assembleGltfScene(filename, sceneScale, addTopLight));
 }

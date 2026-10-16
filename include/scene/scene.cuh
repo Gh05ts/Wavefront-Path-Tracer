@@ -12,6 +12,16 @@
 struct Blas {
     Triangle* triangles;
     NXB::BVH2::DeviceView bvh;
+    uint32_t triangleCount;
+};
+
+// Resolved while uploading the scene; device traversal uses partitioned lists.
+enum class AccelerationMode : uint32_t { Bvh, Direct };
+enum class SceneLeafType : uint32_t { MeshInstance, Sphere };
+
+struct SceneLeaf {
+    SceneLeafType type;
+    uint32_t index;
 };
 
 struct InstanceTransform {
@@ -99,6 +109,7 @@ struct SceneInstance {
     uint32_t meshIndex;
     InstanceTransform transform;
     uint32_t materialOverride = invalidMaterialIndex;
+    AccelerationMode acceleration = AccelerationMode::Bvh;
 };
 
 struct Scene {
@@ -119,6 +130,11 @@ struct Scene {
     NXB::BVH8::DeviceView nexusBvh8;
 
     NXB::BVH2::DeviceView tlas;
+    SceneLeaf* sceneLeaves;
+    uint32_t* directSphereIndices;
+    uint32_t directSphereCount;
+    uint32_t* directInstanceIndices;
+    uint32_t directInstanceCount;
     Blas* blases;
     uint32_t blasCount;
     MeshInstance* instances;
@@ -149,6 +165,9 @@ struct DeviceScene {
     NXB::BVH2 nexusBvh;
     NXB::BVH8 nexusBvh8;
     NXB::BVH2 tlas;
+    SceneLeaf* sceneLeaves;
+    uint32_t* directSphereIndices;
+    uint32_t* directInstanceIndices;
     std::vector<NXB::BVH2> blasBvhs;
     std::vector<Triangle*> meshTriangles;
     Blas* blases;

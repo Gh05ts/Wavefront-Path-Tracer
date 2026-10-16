@@ -7,8 +7,10 @@
 #include <cuda_runtime.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <utility>
 #include <vector>
 
 namespace
@@ -116,42 +118,92 @@ void uploadTriangleLights(DeviceScene& deviceScene) {
 }
 
 void uploadMeshInstances(DeviceScene& deviceScene, const HostScene& hostScene) {
+    std::vector<bool> needsBvh(hostScene.meshes.size(), false);
+    for (const SceneInstance& instance : hostScene.instances) {
+        if (instance.acceleration == AccelerationMode::Bvh)
+            needsBvh[instance.meshIndex] = true;
+    }
+
     std::vector<Blas> hostBlases(hostScene.meshes.size());
     deviceScene.meshTriangles.reserve(hostScene.meshes.size());
     deviceScene.blasBvhs.reserve(hostScene.meshes.size());
-
     for (uint32_t meshIndex = 0; meshIndex < hostScene.meshes.size(); ++meshIndex) {
         const MeshAsset& mesh = hostScene.meshes[meshIndex];
         Triangle* deviceTriangles = nullptr;
         uploadVector(deviceTriangles, mesh.triangles);
         deviceScene.meshTriangles.push_back(deviceTriangles);
-
-        std::vector<NXB::Triangle> nexusTriangles;
-        nexusTriangles.reserve(mesh.triangles.size());
-        for (const Triangle& triangle : mesh.triangles) {
-            nexusTriangles.emplace_back(
-                make_float3(triangle.v0.x, triangle.v0.y, triangle.v0.z),
-                make_float3(triangle.v1.x, triangle.v1.y, triangle.v1.z),
-                make_float3(triangle.v2.x, triangle.v2.y, triangle.v2.z));
+        NXB::BVH2 bvh;
+        if (needsBvh[meshIndex] && !mesh.triangles.empty()) {
+            std::vector<NXB::Triangle> nexusTriangles;
+            nexusTriangles.reserve(mesh.triangles.size());
+            for (const Triangle& triangle : mesh.triangles) {
+                nexusTriangles.emplace_back(
+                    make_float3(triangle.v0.x, triangle.v0.y, triangle.v0.z),
+                    make_float3(triangle.v1.x, triangle.v1.y, triangle.v1.z),
+                    make_float3(triangle.v2.x, triangle.v2.y, triangle.v2.z));
+            }
+            NXB::DeviceBuffer<NXB::Triangle> deviceNexusTriangles(nexusTriangles);
+            bvh = NXB::BuildBVH2(deviceNexusTriangles.Get(), static_cast<uint32_t>(nexusTriangles.size()));
         }
-
-        NXB::DeviceBuffer<NXB::Triangle> deviceNexusTriangles(nexusTriangles);
-        deviceScene.blasBvhs.push_back(NXB::BuildBVH2(deviceNexusTriangles.Get(), static_cast<uint32_t>(nexusTriangles.size())));
-        hostBlases[meshIndex] = Blas{deviceTriangles, deviceScene.blasBvhs.back().View()};
+        deviceScene.blasBvhs.push_back(std::move(bvh));
+        hostBlases[meshIndex] = Blas{deviceTriangles, deviceScene.blasBvhs.back().View(),
+            static_cast<uint32_t>(mesh.triangles.size())};
     }
 
-    std::vector<NXB::AABB> instanceBounds;
     std::vector<MeshInstance> hostInstances;
-    instanceBounds.reserve(hostScene.instances.size());
     hostInstances.reserve(hostScene.instances.size());
-
     uint32_t lightOffset = 0;
     for (const SceneInstance& instance : hostScene.instances) {
+        hostInstances.push_back(MeshInstance{instance.meshIndex, lightOffset,
+            instance.transform, instance.materialOverride});
+        for (const Triangle& triangle : hostScene.meshes[instance.meshIndex].triangles) {
+            if (triangle.lightIndex != invalidLightIndex)
+                ++lightOffset;
+        }
+    }
+    uploadVector(deviceScene.blases, hostBlases);
+    uploadVector(deviceScene.instances, hostInstances);
+    deviceScene.scene.blases = deviceScene.blases;
+    deviceScene.scene.blasCount = static_cast<uint32_t>(hostBlases.size());
+    deviceScene.scene.instances = deviceScene.instances;
+    deviceScene.scene.instanceCount = static_cast<uint32_t>(hostInstances.size());
+}
+
+void uploadSceneTlas(DeviceScene& deviceScene, const HostScene& hostScene) {
+    std::vector<NXB::AABB> bounds;
+    std::vector<SceneLeaf> leaves;
+    std::vector<uint32_t> directSpheres;
+    std::vector<uint32_t> directInstances;
+    bounds.reserve(hostScene.spheres.size() + hostScene.instances.size());
+    leaves.reserve(bounds.capacity());
+
+    for (uint32_t index = 0; index < hostScene.spheres.size(); ++index) {
+        const SceneSphere& object = hostScene.spheres[index];
+        if (object.acceleration == AccelerationMode::Direct) {
+            directSpheres.push_back(index);
+            continue;
+        }
+        const Sphere& sphere = object.geometry;
+        float radius = fabsf(sphere.radius);
+        // Round outward so a tangent hit cannot be culled by a shrunken box.
+        bounds.emplace_back(
+            make_float3(nextafterf(sphere.center.x - radius, -INFINITY),
+                nextafterf(sphere.center.y - radius, -INFINITY), nextafterf(sphere.center.z - radius, -INFINITY)),
+            make_float3(nextafterf(sphere.center.x + radius, INFINITY),
+                nextafterf(sphere.center.y + radius, INFINITY), nextafterf(sphere.center.z + radius, INFINITY)));
+        leaves.push_back(SceneLeaf{SceneLeafType::Sphere, index});
+    }
+    for (uint32_t index = 0; index < hostScene.instances.size(); ++index) {
+        const SceneInstance& instance = hostScene.instances[index];
+        if (instance.acceleration == AccelerationMode::Direct) {
+            directInstances.push_back(index);
+            continue;
+        }
+        if (hostScene.meshes[instance.meshIndex].triangles.empty())
+            continue;
         const NXB::AABB& localBounds = deviceScene.blasBvhs[instance.meshIndex].Bounds();
         NXB::AABB worldBounds;
-        worldBounds.bMin = make_float3(1e30f, 1e30f, 1e30f);
-        worldBounds.bMax = make_float3(-1e30f, -1e30f, -1e30f);
-
+        worldBounds.Clear();
         for (uint32_t corner = 0; corner < 8; ++corner) {
             Vec3 localPoint(
                 (corner & 1) ? localBounds.bMax.x : localBounds.bMin.x,
@@ -165,29 +217,22 @@ void uploadMeshInstances(DeviceScene& deviceScene, const HostScene& hostScene) {
             worldBounds.bMax.y = fmaxf(worldBounds.bMax.y, worldPoint.y);
             worldBounds.bMax.z = fmaxf(worldBounds.bMax.z, worldPoint.z);
         }
-
-        hostInstances.push_back(MeshInstance{
-            instance.meshIndex,
-            lightOffset,
-            instance.transform,
-            instance.materialOverride});
-        for (const Triangle& triangle : hostScene.meshes[instance.meshIndex].triangles) {
-            if (triangle.lightIndex != invalidLightIndex)
-                ++lightOffset;
-        }
-        instanceBounds.push_back(worldBounds);
+        bounds.push_back(worldBounds);
+        leaves.push_back(SceneLeaf{SceneLeafType::MeshInstance, index});
     }
-
-    NXB::DeviceBuffer<NXB::AABB> deviceInstanceBounds(instanceBounds);
-    deviceScene.tlas = NXB::BuildBVH2(deviceInstanceBounds.Get(), static_cast<uint32_t>(instanceBounds.size()));
-
-    uploadVector(deviceScene.blases, hostBlases);
-    uploadVector(deviceScene.instances, hostInstances);
+    if (!bounds.empty()) {
+        NXB::DeviceBuffer<NXB::AABB> deviceBounds(bounds);
+        deviceScene.tlas = NXB::BuildBVH2(deviceBounds.Get(), static_cast<uint32_t>(bounds.size()));
+    }
+    uploadVector(deviceScene.sceneLeaves, leaves);
+    uploadVector(deviceScene.directSphereIndices, directSpheres);
+    uploadVector(deviceScene.directInstanceIndices, directInstances);
     deviceScene.scene.tlas = deviceScene.tlas.View();
-    deviceScene.scene.blases = deviceScene.blases;
-    deviceScene.scene.blasCount = static_cast<uint32_t>(hostBlases.size());
-    deviceScene.scene.instances = deviceScene.instances;
-    deviceScene.scene.instanceCount = static_cast<uint32_t>(hostInstances.size());
+    deviceScene.scene.sceneLeaves = deviceScene.sceneLeaves;
+    deviceScene.scene.directSphereIndices = deviceScene.directSphereIndices;
+    deviceScene.scene.directSphereCount = static_cast<uint32_t>(directSpheres.size());
+    deviceScene.scene.directInstanceIndices = deviceScene.directInstanceIndices;
+    deviceScene.scene.directInstanceCount = static_cast<uint32_t>(directInstances.size());
 }
 
 void uploadDirectAcceleration(DeviceScene& deviceScene, const HostScene& hostScene) {
@@ -225,6 +270,8 @@ void uploadDirectAcceleration(DeviceScene& deviceScene, const HostScene& hostSce
     if (!useNexusBvh) {
         uploadVector(deviceScene.bvhNodes, hostBvh.nodes);
         uploadVector(deviceScene.bvhTriangleIndices, hostBvh.triangleIndices);
+        deviceScene.scene.bvhNodes = deviceScene.bvhNodes;
+        deviceScene.scene.bvhTriangleIndices = deviceScene.bvhTriangleIndices;
         deviceScene.scene.bvhNodeCount = static_cast<uint32_t>(hostBvh.nodes.size());
     }
 
@@ -243,12 +290,18 @@ void uploadDirectAcceleration(DeviceScene& deviceScene, const HostScene& hostSce
     }
 }
 
+} // namespace
+
 DeviceScene uploadScene(const HostScene& hostScene) {
     DeviceScene deviceScene{};
     deviceScene.hostLights = hostScene.lights;
     deviceScene.lightWeights = hostScene.lightWeights;
 
-    uploadVector(deviceScene.spheres, hostScene.spheres);
+    std::vector<Sphere> spheres;
+    spheres.reserve(hostScene.spheres.size());
+    for (const SceneSphere& sphere : hostScene.spheres)
+        spheres.push_back(sphere.geometry);
+    uploadVector(deviceScene.spheres, spheres);
     uploadVector(deviceScene.triangles, hostScene.triangles);
     uploadVector(deviceScene.staticTriangles, hostScene.staticTriangles);
     uploadVector(deviceScene.materials, hostScene.materials);
@@ -257,16 +310,22 @@ DeviceScene uploadScene(const HostScene& hostScene) {
     if (!hostScene.meshes.empty()) {
         auto bvhBuildStart = std::chrono::steady_clock::now();
         uploadMeshInstances(deviceScene, hostScene);
+        uploadSceneTlas(deviceScene, hostScene);
         auto bvhBuildEnd = std::chrono::steady_clock::now();
         float bvhBuildMilliseconds = std::chrono::duration<float, std::milli>(bvhBuildEnd - bvhBuildStart).count();
         uint32_t objectTriangleCount = 0;
         for (const MeshAsset& mesh : hostScene.meshes)
             objectTriangleCount += static_cast<uint32_t>(mesh.triangles.size());
-        std::cout << "Built mesh-instance TLAS/BLAS BVH2 with " << deviceScene.blasBvhs.size() << " BLASes and " << deviceScene.tlas.NodeCount() << " TLAS nodes for " << objectTriangleCount << " object triangles in " << bvhBuildMilliseconds << " ms\n";
+        uint32_t acceleratedMeshCount = 0;
+        for (const NXB::BVH2& bvh : deviceScene.blasBvhs)
+            acceleratedMeshCount += bvh.View().nodes != nullptr;
+        std::cout << "Built scene TLAS/BLAS BVH2 with " << acceleratedMeshCount << " BLASes and " << deviceScene.tlas.NodeCount() << " TLAS nodes for " << objectTriangleCount << " object triangles in " << bvhBuildMilliseconds << " ms\n";
     } else if (!hostScene.triangles.empty()) {
         uploadDirectAcceleration(deviceScene, hostScene);
     }
 
+    if (hostScene.meshes.empty())
+        uploadSceneTlas(deviceScene, hostScene);
     uploadTriangleLights(deviceScene);
 
     deviceScene.scene.spheres = deviceScene.spheres;
@@ -279,27 +338,6 @@ DeviceScene uploadScene(const HostScene& hostScene) {
     deviceScene.scene.materialCount = static_cast<uint32_t>(hostScene.materials.size());
     deviceScene.scene.blackBackground = hostScene.blackBackground;
     return deviceScene;
-}
-} // namespace
-
-DeviceScene createDemoScene() {
-    return uploadScene(assembleDemoScene());
-}
-
-DeviceScene createRtWeekScene(const char* filename) {
-    return uploadScene(assembleRtWeekScene(filename));
-}
-
-DeviceScene createObjScene(const ObjSceneOptions& options) {
-    return uploadScene(assembleObjScene(options));
-}
-
-DeviceScene createCornellScene(const CornellSceneOptions& options) {
-    return uploadScene(assembleCornellScene(options));
-}
-
-DeviceScene createGltfScene(const char* filename, float sceneScale, bool addTopLight) {
-    return uploadScene(assembleGltfScene(filename, sceneScale, addTopLight));
 }
 
 void destroyDeviceScene(DeviceScene& deviceScene) {
@@ -316,6 +354,9 @@ void destroyDeviceScene(DeviceScene& deviceScene) {
     deviceScene.blasBvhs.clear();
     freeDevice(deviceScene.blases);
     freeDevice(deviceScene.instances);
+    freeDevice(deviceScene.sceneLeaves);
+    freeDevice(deviceScene.directSphereIndices);
+    freeDevice(deviceScene.directInstanceIndices);
     freeDevice(deviceScene.materials);
     freeDevice(deviceScene.lights);
     freeDevice(deviceScene.lightAlias);

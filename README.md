@@ -12,7 +12,10 @@ checkpoints, OBJ/MTL and glTF/GLB loading, emissive triangle sampling, texture
 maps, normal maps, alpha masking, transmission/volume attenuation, and
 optional photon-mapped caustics. NexusBVH supplies the H-PLOC acceleration
 structures. The current scene factories use BVH2 TLAS/BLAS traversal by
-default; BVH8 traversal code is present but not selected by the active setup.
+default. The TLAS contains spheres and mesh instances; ground spheres are
+explicitly tested directly to keep their large bounds out of the hierarchy.
+Host scene objects can select `AccelerationMode::Bvh` or `Direct`. BVH8
+traversal code is present but not selected by the default setup.
 
 ## Build
 
@@ -100,6 +103,8 @@ compatible, or use `--push-assets` when the coordinator owns the asset bundle.
 The output image defaults to `render.ppm`. Checkpoints are written to
 `render.checkpoint` when the asynchronous checkpoint queue is able to accept
 one.
+
+For repeatable render timings, see [the benchmark instructions](benchmarks/README.md).
 
 ## Where to look
 

@@ -44,6 +44,8 @@ the same CUDA compilation unit. The photon kernels are isolated in
 
 - Queue capacity is the tile pixel count in tiled mode and the frame pixel
   count otherwise.
+- Primary rays use their tile-local pixel index as their queue slot; one
+  thread sets the count directly, without atomic reservations or a prior reset.
 - The captured path uses a separate intersection-result buffer and compacts
   surviving continuations in `shadePaths` with one atomic reservation per
   warp, followed by ballot/shuffle rank calculation.
@@ -62,11 +64,21 @@ CUDA events are released.
 
 ### Acceleration structure selection
 
-The active mesh-instance path is a NexusBVH BVH2 TLAS over BVH2 BLASes. The
-direct NexusBVH BVH2/BVH8 and legacy host BVH paths remain available in the
-source, but are selected through compile-time or preset-specific branches.
-Keep selection policy out of traversal code as the scene builder is cleaned
-up.
+The scene TLAS is a NexusBVH BVH2 over typed sphere and mesh-instance leaves;
+accelerated meshes use BVH2 BLASes. `SceneSphere` and `SceneInstance` select
+`AccelerationMode::Bvh` (default) or `Direct` on the host. Upload partitions
+objects into TLAS leaves and separate direct sphere/instance index lists;
+the policy is not uploaded with primitive data. Direct objects remain visible,
+cast shadows, and retain their light registration. A mesh BLAS is built only
+when at least one accelerated instance needs it. Shared direct instances
+bypass that BLAS. Ground spheres explicitly select `Direct` in scene assembly.
+
+The direct NexusBVH BVH2/BVH8 and legacy host BVH triangle paths coexist with
+the sphere TLAS. Closest-hit and visibility queries must consider both.
+BVH2 traversal caches inverse ray direction once per traversal, and sphere
+shading attributes are computed only for the winning hit. CUDA regression
+tests compare the resulting intersections and visibility against a host
+brute-force reference, including alpha masking and mixed acceleration modes.
 
 ## Recommended sequence
 

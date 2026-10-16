@@ -262,7 +262,6 @@ void RenderDriver::createWavefrontGraph() {
 
     CUDA_CHECK(cudaStreamBeginCapture(resources_.traceStream, cudaStreamCaptureModeGlobal));
 
-    CUDA_CHECK(cudaMemsetAsync(resources_.deviceRayCount, 0, sizeof(uint32_t), resources_.traceStream));
     generatePrimaryRays<<<blockCount_, config_.blockSize, 0, resources_.traceStream>>>(
         resources_.rayQueue, resources_.devicePathStates, camera_, width_, height_,
         resources_.renderSession.deviceSampleIndex, resources_.deviceRenderTile,

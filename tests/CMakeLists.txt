@@ -154,3 +154,16 @@ target_include_directories(rng_tests
 
 target_link_libraries(rng_tests PRIVATE CUDA::cudart)
 add_test(NAME rng_tests COMMAND rng_tests)
+
+add_executable(scene_acceleration_tests
+    scene_acceleration_tests.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/rng.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/scene/scene.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/scene/bvh.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/scene/bvh_sbvh.cpp
+)
+target_include_directories(scene_acceleration_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+target_link_libraries(scene_acceleration_tests PRIVATE NXB::NexusBVH CUDA::cudart stdc++fs)
+set_target_properties(scene_acceleration_tests PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+add_test(NAME scene_acceleration_tests COMMAND scene_acceleration_tests)
+set_tests_properties(scene_acceleration_tests PROPERTIES SKIP_RETURN_CODE 77)

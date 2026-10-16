@@ -65,7 +65,21 @@ source, room palette, backdrop handling, material conversion, and light profile
 explicit. OBJ scenes use `ObjSceneOptions` and `ObjAccelerationPolicy` rather
 than filename tests or compile-time boolean switches.
 
-Cornell/glTF-style scenes use a TLAS over mesh instances and one NexusBVH BVH2 BLAS per mesh. The simple/demo path can use the direct triangle representation and NexusBVH H-PLOC BVH2. BVH8 support is represented in the scene types and traversal code, but the current scene setup selects BVH2 (`useNexusBvh8 = false`). The legacy host BVH builders remain in `bvh.cpp` and `bvh_sbvh.cpp` for fallback/comparison paths.
+Scene upload builds a NexusBVH BVH2 TLAS over typed sphere and mesh-instance
+leaves, with a BVH2 BLAS for each mesh used by an accelerated instance. Host
+`SceneSphere` and `SceneInstance` objects select `AccelerationMode::Bvh` or
+`Direct`. Upload partitions direct objects into separate sphere and instance
+index lists, preserving their visibility and light registration. The ground
+spheres explicitly use direct tests. Direct-only meshes do not need a BLAS;
+a direct instance of a shared mesh bypasses any BLAS needed by its accelerated
+siblings. Scene construction and policy remain in `scene_host.cpp`, and the
+public `uploadScene()` in `scene.cu` owns device allocation and BVH builds.
+
+The simple/demo path also uses a direct triangle representation. Alternative
+NexusBVH BVH2/BVH8 and legacy host triangle BVHs remain available and coexist
+with a sphere TLAS. Both closest-hit and shadow queries consider these
+structures. The legacy host BVH builders remain in `bvh.cpp` and
+`bvh_sbvh.cpp` for fallback/comparison paths.
 
 The `rtweek` benchmark scene uses one shared Lucy BLAS for three instances with
 per-instance material overrides. This keeps the diffuse, metal, and dielectric
