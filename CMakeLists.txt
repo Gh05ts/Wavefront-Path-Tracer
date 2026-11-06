@@ -58,7 +58,21 @@ set(BENCHMARK_SOURCES ${PATHTRACER_SOURCES})
 list(FILTER BENCHMARK_SOURCES EXCLUDE REGEX "src/distributed/")
 add_executable(render_benchmark EXCLUDE_FROM_ALL benchmarks/render_benchmark.cpp ${BENCHMARK_SOURCES})
 
-foreach(renderer_target IN ITEMS pathtracer render_benchmark)
+option(PATHTRACER_BUILD_DATASET_CAPTURE "Build HDR denoising dataset capture tools (requires OpenEXR)" OFF)
+set(RENDERER_TARGETS pathtracer render_benchmark)
+if(PATHTRACER_BUILD_DATASET_CAPTURE)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(OPENEXR REQUIRED IMPORTED_TARGET OpenEXR)
+    add_executable(dataset_capture
+        tools/dataset_capture.cu
+        src/renderer/frame_export.cpp
+        ${BENCHMARK_SOURCES}
+    )
+    target_link_libraries(dataset_capture PRIVATE PkgConfig::OPENEXR)
+    list(APPEND RENDERER_TARGETS dataset_capture)
+endif()
+
+foreach(renderer_target IN LISTS RENDERER_TARGETS)
     target_include_directories(${renderer_target}
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/include

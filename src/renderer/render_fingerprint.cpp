@@ -79,9 +79,10 @@ private:
     uint64_t value_ = 1469598103934665603ull;
 };
 
-void appendSceneFingerprint(FingerprintBuilder& builder, const SceneConfig& scene) {
+void appendSceneFingerprint(FingerprintBuilder& builder, const SceneConfig& scene, bool includeName = true) {
     builder.appendU32(static_cast<uint32_t>(scene.preset));
-    builder.appendString(scene.name.c_str());
+    if (includeName)
+        builder.appendString(scene.name.c_str());
 
     switch (scene.preset) {
     case ScenePreset::Sponza:
@@ -144,5 +145,11 @@ uint64_t computeRenderFingerprint(const RenderConfig& render, const SceneConfig&
     FingerprintBuilder builder;
     appendSceneFingerprint(builder, scene);
     appendRenderFingerprint(builder, render);
+    return builder.value();
+}
+
+uint64_t computeSceneFingerprint(const SceneConfig& scene) {
+    FingerprintBuilder builder;
+    appendSceneFingerprint(builder, scene, false);
     return builder.value();
 }

@@ -134,5 +134,15 @@ int main() {
     fingerprintRender.rngStrategy = RngStrategy::Pcg32;
     valid &= check(firstFingerprint != computeRenderFingerprint(fingerprintRender, fingerprintScene), "RNG strategy change did not change fingerprint");
 
+    const uint64_t sceneFingerprint = computeSceneFingerprint(fingerprintScene);
+    fingerprintScene.name = "renamed-demo";
+    valid &= check(sceneFingerprint == computeSceneFingerprint(fingerprintScene),
+        "renaming a scene changed its dataset identity");
+    valid &= check(firstFingerprint != computeRenderFingerprint(RenderConfig{}, fingerprintScene),
+        "legacy render fingerprint no longer includes the scene name");
+    fingerprintScene.useNormalMaps = !fingerprintScene.useNormalMaps;
+    valid &= check(sceneFingerprint != computeSceneFingerprint(fingerprintScene),
+        "scene shading change did not change its dataset identity");
+
     return valid ? 0 : 1;
 }

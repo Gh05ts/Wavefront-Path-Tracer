@@ -108,6 +108,9 @@ For repeatable render timings, see [the benchmark instructions](benchmarks/READM
 
 ## Where to look
 
+For HDR training frames and temporal guides for the separate denoiser project,
+see [denoising dataset capture](docs/DENOISING_DATA.md).
+
 `ARCHITECTURE.md` is the current data-flow and ownership map. The main source
 boundaries are:
 

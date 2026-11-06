@@ -49,6 +49,7 @@ void advanceSampleIndex(uint32_t* sampleIndex, const RenderTile* tile) {
 #include "renderer/device_sampling.cuh"
 #include "renderer/device_traversal.cuh"
 #include "renderer/device_path_shading.cuh"
+#include "renderer/device_frame_guides.cuh"
 
 __global__
 void persistentWavefrontTrace(RayQueue initialRays, RayQueue secondaryRays, PathState* pathStates, uint32_t* queueCounts, Camera camera, uint32_t width, uint32_t height, const uint32_t* sampleIndex, const RenderTile* tile, RngStrategy rngStrategy, Scene scene, uint32_t maxDepth, uint32_t russianRouletteStartDepth, bool intersectionDebug, bool shadingNormalDebug, Vec3* framebuffer, PhotonGrid photonGrid, float photonGatherRadius) {
