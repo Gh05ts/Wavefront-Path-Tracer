@@ -30,17 +30,20 @@ def local_path(root, uri):
     return path
 
 
-def convert(source):
+def convert(source, *, reuse=False, verify_only=False):
     source = source.resolve()
     if source.suffix.lower() != ".gltf":
         raise ValueError("Expected a JSON .gltf file")
     target = source.with_name(source.stem + "-png.gltf")
-    if target.exists():
+    if target.exists() and not (reuse or verify_only):
         raise FileExistsError(target)
+    if verify_only and not target.is_file():
+        raise FileNotFoundError(target)
     document = json.loads(source.read_text())
     root = source.parent
     images = document.get("images", [])
     converted = {}
+    verified = set()
     result = deepcopy(document)
     remap, new_images = {}, []
     # DDS extension sources and PNG fallback entries can describe the same image.
@@ -53,6 +56,8 @@ def convert(source):
         dds = path if path.suffix.lower() == ".dds" else path.with_suffix(".dds")
         output = path.with_suffix(".png") if path.suffix.lower() == ".dds" else path
         if (path.suffix.lower() == ".dds" or not path.exists()) and not output.exists():
+            if verify_only:
+                raise FileNotFoundError(output)
             if not dds.is_file():
                 raise FileNotFoundError(f"Neither image nor DDS alternative exists: {path}")
             if output not in converted:
@@ -70,6 +75,10 @@ def convert(source):
                 print(f"Converted {len(converted)}: {output.relative_to(root)}", flush=True)
         if not output.is_file():
             raise FileNotFoundError(output)
+        if (reuse or verify_only) and output not in verified:
+            with Image.open(output) as check:
+                check.verify()
+            verified.add(output)
         image = deepcopy(entry)
         image["uri"] = quote(output.relative_to(root).as_posix(), safe="/")
         image.pop("mimeType", None)
@@ -94,6 +103,11 @@ def convert(source):
     for key in ("extensionsUsed", "extensionsRequired"):
         if key in result:
             result[key] = [name for name in result[key] if name != "MSFT_texture_dds"]
+    if target.exists():
+        if json.loads(target.read_text()) != result:
+            raise ValueError(f"Existing derived glTF differs from the conversion: {target}")
+        print(f"Verified {target}: {len(new_images)} images (existing files preserved)")
+        return target
     partial = target.with_name(target.name + ".partial")
     partial.write_text(json.dumps(result, indent=2) + "\n")
     partial.replace(target)
@@ -104,4 +118,6 @@ def convert(source):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("gltf", type=Path)
-    convert(parser.parse_args().gltf)
+    parser.add_argument("--reuse", action="store_true", help="Verify and reuse existing output files")
+    args = parser.parse_args()
+    convert(args.gltf, reuse=args.reuse)

@@ -1,0 +1,93 @@
+{
+  "research": {
+    "path": "assets/gltf-research-scenes",
+    "url": "https://github.com/ErfanMo77/gltf-research-scenes.git",
+    "revision": "f5cf8a25ab8a7e2ceca5e3b17d9c9456896785a4",
+    "sparse_paths": [
+      "scenes/bmw-m6",
+      "scenes/bathroom",
+      "scenes/breakfast-room",
+      "scenes/classroom2",
+      "scenes/living-room",
+      "scenes/common"
+    ],
+    "lfs_files": [
+      {
+        "path": "scenes/bathroom/gltf/bathroom.bin",
+        "bytes": 59333684,
+        "sha256": "c3129b599cbd2323c571ce403aabeb4c0810c78f92e94acbd90be32d44344aec"
+      },
+      {
+        "path": "scenes/bathroom/gltf/bathroom.png",
+        "bytes": 1328670,
+        "sha256": "96756caba70fa5e9b154e1e1feb142e36c37a378a10a239a9957b704b0ecd9e9"
+      },
+      {
+        "path": "scenes/bmw-m6/gltf/bmw-m6.png",
+        "bytes": 1329181,
+        "sha256": "171097d5330507ac5db8ad193265811b51fbf910df03be8747575c9b2b58a471"
+      },
+      {
+        "path": "scenes/bmw-m6/gltf/bmw_m6.bin",
+        "bytes": 18655440,
+        "sha256": "4a4868f263eced2c11eb1db9c2b5282b729597f9e9208ea34b3ab2a9dca3e318"
+      },
+      {
+        "path": "scenes/breakfast-room/gltf/breakfast-room.png",
+        "bytes": 1112767,
+        "sha256": "427336a6108bd871c1286d263d89e5fa45e5d8c5f9a847a0689115e2f1b8480c"
+      },
+      {
+        "path": "scenes/breakfast-room/gltf/breakfast_room.bin",
+        "bytes": 12351464,
+        "sha256": "0342fd665ad6155403a982ae6b1c4cc5a03175b2a5ed0d93015263874a915016"
+      },
+      {
+        "path": "scenes/breakfast-room/gltf/breakfast_room_environment.hdr",
+        "bytes": 406981,
+        "sha256": "c5158df5b09a5b84ca7689dfe205f53ad84f7c3830310c7a6189b32372783a57"
+      },
+      {
+        "path": "scenes/classroom2/gltf/classroom2.glb",
+        "bytes": 97071816,
+        "sha256": "8e94a4abbc061f7453fc535bc6feaaaecc9b2797b33d5b62a9bd2b598a5208dc"
+      },
+      {
+        "path": "scenes/classroom2/gltf/classroom2.png",
+        "bytes": 2764089,
+        "sha256": "c6fd67cda8bce51b9819d9043084ad64070eb1ebe05433e494e580739644954f"
+      },
+      {
+        "path": "scenes/common/sunflowers_environment.hdr",
+        "bytes": 5833408,
+        "sha256": "41f7955743120a2cc8c0380028c810e8f17c7e8a2c949308758fe0719b57d97c"
+      },
+      {
+        "path": "scenes/living-room/gltf/living-room.png",
+        "bytes": 1088554,
+        "sha256": "64fbc488c4aab60a9e20b24e3fe75a906c7f418d95e7ec3ff748803899467f4a"
+      },
+      {
+        "path": "scenes/living-room/gltf/living_room.bin",
+        "bytes": 17877244,
+        "sha256": "edf48e690aa8d8455e9a5b08426315f80815c8b92217f7204f496e936a5ed1a3"
+      }
+    ],
+    "documents": [
+      "scenes/bmw-m6/gltf/bmw_m6_core.gltf",
+      "scenes/bmw-m6/gltf/bmw_m6_extended.gltf",
+      "scenes/bathroom/gltf/bathroom_core.gltf",
+      "scenes/bathroom/gltf/bathroom_extended.gltf",
+      "scenes/breakfast-room/gltf/breakfast_room_core.gltf",
+      "scenes/breakfast-room/gltf/breakfast_room_extended.gltf",
+      "scenes/classroom2/gltf/classroom2.glb",
+      "scenes/living-room/gltf/living_room_core.gltf",
+      "scenes/living-room/gltf/living_room_extended.gltf"
+    ]
+  },
+  "bistro": {
+    "path": "assets/niagara_bistro",
+    "url": "https://github.com/zeux/niagara_bistro.git",
+    "revision": "2bdb6a410f8ebd475d3737e7c8e038ed2b00b02e"
+  }
+}

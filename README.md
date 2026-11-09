@@ -22,6 +22,13 @@ For DDS-based assets such as Niagara Bistro, use the [PNG conversion utility](do
 Scene manifests also support [HDR environment maps](docs/hdr-environments.md)
 with intensity, rotation, importance sampling and MIS.
 
+## Download and prepare scene assets
+
+The research scenes and Niagara Bistro are pinned submodules. After cloning,
+install Pillow and run `python3 tools/setup_assets.py` to fetch the selected
+runtime files and create Bistro's PNG textures. Repeated runs reuse valid files.
+See [asset setup](docs/asset-setup.md) for the full fresh-clone commands and checks.
+
 ## Build
 
 The project requires CMake, a CUDA toolkit, and a CUDA-capable compiler. The
