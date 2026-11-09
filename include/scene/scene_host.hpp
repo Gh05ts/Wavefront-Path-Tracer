@@ -26,6 +26,7 @@ struct HostScene {
     std::vector<ObjTexture> textures;
     std::vector<TriangleLight> lights;
     std::vector<float> lightWeights;
+    std::vector<PunctualLight> punctualLights;
 
     ObjAccelerationPolicy acceleration = ObjAccelerationPolicy::TlasBlasBvh2;
     bool blackBackground = false;

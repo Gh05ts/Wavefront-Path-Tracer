@@ -1,5 +1,6 @@
 #include "distributed/protocol.hpp"
 #include "distributed/transport.hpp"
+#include "distributed/worker.hpp"
 
 #include <atomic>
 #include <cstdio>
@@ -7,6 +8,9 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <filesystem>
+#include <fstream>
+#include <chrono>
 
 namespace
 {
@@ -51,6 +55,54 @@ bool roundTrip(const DistributedMessage& original, DistributedMessage& decoded) 
     return true;
 }
 } // namespace
+
+bool environmentAssetTransfer() {
+    namespace fs = std::filesystem;
+    fs::path root=fs::temp_directory_path()/("hdr-transfer-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(root/"geometry");fs::create_directories(root/"lighting");
+    {std::ofstream out(root/"lighting/map.hdr");out<<"environment transfer payload";}
+    {std::ofstream out(root/"geometry/scene.gltf");out<<"{\"asset\":{\"version\":\"2.0\"}}";}
+    bool valid=true;
+    for(bool geometry:{false,true}) {
+        SceneConfig scene;scene.preset=geometry?ScenePreset::Sponza:ScenePreset::Demo;
+        scene.gltfFilename=(root/"geometry/scene.gltf").string();
+        scene.environmentFilename=(root/"lighting/map.hdr").string();
+        DistributedAssetCatalog catalog;std::string error;
+        if(!buildDistributedAssetCatalog(scene,catalog,&error))return check(false,error.c_str());
+        uint64_t fingerprint=geometry?1235:1234;
+        DistributedJobConfig job{fingerprint,1,1,1,1,1,1};
+        auto tasks=createRenderTasks(1,1,1,1,1,1,fingerprint);DistributedCoordinator coordinator(job,tasks);
+        CoordinatorSessionConfig config;config.assetCatalog=&catalog;
+        CoordinatorWorkerSession session(coordinator,config);
+        auto listener=TcpListener::listenOn("127.0.0.1",0,&error);
+        if(!listener)return check(false,error.c_str());
+        std::atomic<bool> serverValid=true;
+        std::thread server([&]{
+            std::string messageError;auto connection=listener->accept(&messageError);
+            if(!connection){serverValid=false;return;}
+            DistributedMessage message;
+            while(connection->receive(message,&messageError)){
+                auto response=session.handleMessage(message,0);
+                if(!connection->send(response.message,&messageError)){serverValid=false;break;}
+                if(!response.keepAlive)break;
+            }
+        });
+        auto client=DistributedWorkerClient::connectToCoordinator("127.0.0.1",listener->port(),"hdr-worker",fingerprint,&error);
+        valid &= check(client.has_value(),"Environment transfer registration");
+        if(client){
+            valid &= check(client->synchronizeAssets(scene,(root/"cache").string(),&error),error.c_str());
+            fs::path expected=root/"cache"/std::to_string(fingerprint)/distributedEnvironmentAssetPath;
+            valid &= check(scene.environmentFilename==expected.string()&&fs::is_regular_file(expected),"Environment path rewritten into worker cache");
+            std::ifstream in(expected);std::string contents((std::istreambuf_iterator<char>(in)),{});
+            valid &= check(contents=="environment transfer payload","Environment cache bytes/checksum");
+            if(geometry)valid &= check(fs::is_regular_file(scene.gltfFilename)&&scene.gltfFilename==scene.objectFilename,"Primary asset cache rewrite alongside external environment");
+            valid &= check(client->synchronizeAssets(scene,(root/"cache").string(),&error),"Environment cache reuse");
+            client->close();
+        }
+        listener->close();server.join();valid &= check(serverValid,"Environment asset server transfer");
+    }
+    return valid;
+}
 
 int main() {
     bool valid = true;
@@ -120,12 +172,18 @@ int main() {
         original.configuration.enableCaustics = true;
         original.configuration.scene.preset = ScenePreset::Crystal;
         original.configuration.scene.name = "crystal";
+        original.configuration.scene.environmentFilename = "lighting/studio.hdr";
+        original.configuration.scene.environmentIntensity = 3.5f;
+        original.configuration.scene.environmentRotationDegrees = 90;
         DistributedMessage decoded;
         valid &= check(roundTrip(original, decoded), "worker configuration did not round-trip");
         const auto* value = std::get_if<WorkerHelloAcceptedMessage>(&decoded);
         valid &= check(value != nullptr && value->hasConfiguration &&
             value->configuration.width == 640 && value->configuration.enableCaustics &&
-            value->configuration.scene.preset == ScenePreset::Crystal,
+            value->configuration.scene.preset == ScenePreset::Crystal &&
+            value->configuration.scene.environmentFilename == "lighting/studio.hdr" &&
+            value->configuration.scene.environmentIntensity == 3.5f &&
+            value->configuration.scene.environmentRotationDegrees == 90,
             "worker configuration payload changed");
     }
     {
@@ -229,5 +287,6 @@ int main() {
     listener->close();
     server.join();
     valid &= check(serverValid.load(), "loopback server exchange failed");
+    valid &= environmentAssetTransfer();
     return valid ? 0 : 1;
 }

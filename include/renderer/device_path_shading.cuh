@@ -37,11 +37,7 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
             path.active = false;
             framebuffer[path.pixelIndex] += color;
         } else if (!results[index].didHit) {
-            if (!scene.blackBackground) {
-                float t = 0.5f * (path.ray.direction.y + 1.0f);
-                Vec3 sky = (1.0f - t) * Vec3(1.0f, 1.0f, 1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
-                path.radiance += hadamard(path.throughput, sky);
-            }
+            addEnvironmentOrSky(path, scene);
             path.active = false;
             framebuffer[path.pixelIndex] += path.radiance;
         } else {
@@ -93,6 +89,8 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
                 switch (materialType) {
                 case MaterialType::Diffuse: {
                     sampleDirectLight(path, hit, shadedHit, material, scene);
+                    sampleDirectPunctualLight(path, hit, shadedHit, material, scene);
+                    sampleDirectEnvironment(path, hit, shadedHit, material, scene);
                     if (photonGrid.heads != nullptr) {
                         Vec3 causticIrradiance = gatherCaustics(shadedHit, photonGrid, photonGatherRadius);
                         path.radiance += hadamard(path.throughput, hadamard(albedo, causticIrradiance));
@@ -108,6 +106,14 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
                     path.throughput = hadamard(path.throughput, albedo);
                     path.previousBsdfPdf = fmaxf(0.0f, dot(samplingNormal, direction)) * 0.31830988618f;
                     path.specularBounce = false;
+                    break;
+                }
+
+                case MaterialType::SpecularGlossiness: {
+                    sampleDirectLight(path, hit, shadedHit, material, scene);
+                    sampleDirectPunctualLight(path, hit, shadedHit, material, scene);
+                    sampleDirectEnvironment(path, hit, shadedHit, material, scene);
+                    direction = continueSpecGloss(path, hit, shadedHit, material, scene);
                     break;
                 }
 
@@ -215,11 +221,7 @@ __device__ void shadePersistentPath(PathState& path, const TraceResult& result, 
     }
 
     if (!result.didHit) {
-        if (!scene.blackBackground) {
-            float t = 0.5f * (path.ray.direction.y + 1.0f);
-            Vec3 sky = (1.0f - t) * Vec3(1.0f, 1.0f, 1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
-            path.radiance += hadamard(path.throughput, sky);
-        }
+        addEnvironmentOrSky(path, scene);
         path.active = false;
         framebuffer[path.pixelIndex] += path.radiance;
         return;
@@ -270,6 +272,8 @@ __device__ void shadePersistentPath(PathState& path, const TraceResult& result, 
     switch (materialType) {
     case MaterialType::Diffuse: {
         sampleDirectLight(path, hit, shadedHit, material, scene);
+        sampleDirectPunctualLight(path, hit, shadedHit, material, scene);
+        sampleDirectEnvironment(path, hit, shadedHit, material, scene);
         if (photonGrid.heads != nullptr) {
             Vec3 causticIrradiance = gatherCaustics(shadedHit, photonGrid, photonGatherRadius);
             path.radiance += hadamard(path.throughput, hadamard(albedo, causticIrradiance));
@@ -283,6 +287,14 @@ __device__ void shadePersistentPath(PathState& path, const TraceResult& result, 
         path.throughput = hadamard(path.throughput, albedo);
         path.previousBsdfPdf = fmaxf(0.0f, dot(samplingNormal, direction)) * 0.31830988618f;
         path.specularBounce = false;
+        break;
+    }
+
+    case MaterialType::SpecularGlossiness: {
+        sampleDirectLight(path, hit, shadedHit, material, scene);
+        sampleDirectPunctualLight(path, hit, shadedHit, material, scene);
+        sampleDirectEnvironment(path, hit, shadedHit, material, scene);
+        direction = continueSpecGloss(path, hit, shadedHit, material, scene);
         break;
     }
 

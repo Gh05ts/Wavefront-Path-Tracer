@@ -17,6 +17,11 @@ explicitly tested directly to keep their large bounds out of the hierarchy.
 Host scene objects can select `AccelerationMode::Bvh` or `Direct`. BVH8
 traversal code is present but not selected by the default setup.
 
+glTF assets can use [specular/glossiness materials and punctual lights](docs/gltf-materials-and-lights.md).
+For DDS-based assets such as Niagara Bistro, use the [PNG conversion utility](docs/dds-gltf-conversion.md).
+Scene manifests also support [HDR environment maps](docs/hdr-environments.md)
+with intensity, rotation, importance sampling and MIS.
+
 ## Build
 
 The project requires CMake, a CUDA toolkit, and a CUDA-capable compiler. The

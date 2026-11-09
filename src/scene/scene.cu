@@ -1,5 +1,6 @@
 #include "scene/scene.cuh"
 #include "scene/scene_host.hpp"
+#include "scene/environment.hpp"
 #include "scene/bvh.cuh"
 
 #include <NXB/BVHBuilder.h>
@@ -7,9 +8,11 @@
 #include <cuda_runtime.h>
 
 #include <chrono>
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -292,6 +295,44 @@ void uploadDirectAcceleration(DeviceScene& deviceScene, const HostScene& hostSce
 
 } // namespace
 
+void clearEnvironmentMap(DeviceScene& deviceScene) {
+    if (deviceScene.environmentTexture) checkCuda(cudaDestroyTextureObject(deviceScene.environmentTexture));
+    if (deviceScene.environmentArray) checkCuda(cudaFreeArray(deviceScene.environmentArray));
+    freeDevice(deviceScene.environmentProbabilities);
+    freeDevice(deviceScene.environmentAlias);
+    deviceScene.environmentTexture = 0;
+    deviceScene.environmentArray = nullptr;
+    deviceScene.scene.environment = EnvironmentView{};
+}
+
+void uploadEnvironmentMap(DeviceScene& deviceScene, const HostEnvironment& map, float intensity, float rotationDegrees) {
+    if (map.width == 0 || map.height == 0 || uint64_t(map.width)*map.height != map.pixels.size() ||
+        map.probabilities.size() != map.pixels.size() || map.alias.size() != map.pixels.size() ||
+        !std::isfinite(intensity) || intensity < 0 || !std::isfinite(rotationDegrees))
+        throw std::invalid_argument("Invalid HDR environment upload");
+    clearEnvironmentMap(deviceScene);
+    auto channel = cudaCreateChannelDesc<float4>();
+    checkCuda(cudaMallocArray(&deviceScene.environmentArray, &channel, map.width, map.height));
+    size_t pitch = map.width * sizeof(float4);
+    checkCuda(cudaMemcpy2DToArray(deviceScene.environmentArray, 0, 0, map.pixels.data(), pitch, pitch,
+        map.height, cudaMemcpyHostToDevice));
+    cudaResourceDesc resource{};
+    resource.resType = cudaResourceTypeArray;
+    resource.res.array.array = deviceScene.environmentArray;
+    cudaTextureDesc texture{};
+    texture.normalizedCoords = 1;
+    texture.addressMode[0] = cudaAddressModeWrap;
+    texture.addressMode[1] = cudaAddressModeClamp;
+    texture.filterMode = cudaFilterModeLinear;
+    texture.readMode = cudaReadModeElementType;
+    checkCuda(cudaCreateTextureObject(&deviceScene.environmentTexture, &resource, &texture, nullptr));
+    uploadVector(deviceScene.environmentProbabilities, map.probabilities);
+    uploadVector(deviceScene.environmentAlias, map.alias);
+    deviceScene.scene.environment = EnvironmentView{deviceScene.environmentTexture, deviceScene.environmentAlias,
+        deviceScene.environmentProbabilities, map.width, map.height, intensity,
+        std::fmod(rotationDegrees, 360.0f) * (3.14159265359f/180.0f)};
+}
+
 DeviceScene uploadScene(const HostScene& hostScene) {
     DeviceScene deviceScene{};
     deviceScene.hostLights = hostScene.lights;
@@ -305,6 +346,13 @@ DeviceScene uploadScene(const HostScene& hostScene) {
     uploadVector(deviceScene.triangles, hostScene.triangles);
     uploadVector(deviceScene.staticTriangles, hostScene.staticTriangles);
     uploadVector(deviceScene.materials, hostScene.materials);
+    std::vector<PunctualLight> punctualLights = hostScene.punctualLights;
+    auto positionalBegin = std::stable_partition(punctualLights.begin(), punctualLights.end(),
+        [](const PunctualLight& light) { return light.type == PunctualLightType::Directional; });
+    uploadVector(deviceScene.punctualLights, punctualLights);
+    deviceScene.scene.punctualLights = deviceScene.punctualLights;
+    deviceScene.scene.punctualLightCount = static_cast<uint32_t>(hostScene.punctualLights.size());
+    deviceScene.scene.directionalLightCount = static_cast<uint32_t>(positionalBegin - punctualLights.begin());
     uploadTextures(deviceScene, hostScene.textures);
 
     if (!hostScene.meshes.empty()) {
@@ -341,6 +389,7 @@ DeviceScene uploadScene(const HostScene& hostScene) {
 }
 
 void destroyDeviceScene(DeviceScene& deviceScene) {
+    clearEnvironmentMap(deviceScene);
     freeDevice(deviceScene.spheres);
     freeDevice(deviceScene.triangles);
     freeDevice(deviceScene.staticTriangles);
@@ -360,6 +409,7 @@ void destroyDeviceScene(DeviceScene& deviceScene) {
     freeDevice(deviceScene.materials);
     freeDevice(deviceScene.lights);
     freeDevice(deviceScene.lightAlias);
+    freeDevice(deviceScene.punctualLights);
     for (cudaTextureObject_t textureObject : deviceScene.textureObjects)
         checkCuda(cudaDestroyTextureObject(textureObject));
     for (cudaArray_t textureArray : deviceScene.textureArrays)

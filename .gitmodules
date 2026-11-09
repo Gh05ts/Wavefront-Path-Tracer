@@ -1,3 +1,9 @@
 [submodule "extern/NexusBVH"]
 	path = extern/NexusBVH
 	url = https://github.com/StokastX/NexusBVH.git
+[submodule "assets/gltf-research-scenes"]
+	path = assets/gltf-research-scenes
+	url = https://github.com/ErfanMo77/gltf-research-scenes.git
+[submodule "assets/niagara_bistro"]
+	path = assets/niagara_bistro
+	url = https://github.com/zeux/niagara_bistro.git

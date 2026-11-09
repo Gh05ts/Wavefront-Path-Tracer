@@ -1,5 +1,35 @@
 find_package(Threads REQUIRED)
 
+add_executable(environment_tests environment_tests.cpp ../src/scene/environment.cpp
+    ../src/scene/obj_loader.cpp ../src/scene/scene_manifest.cpp ../src/config.cpp
+    ../src/renderer/render_fingerprint.cpp ../src/distributed/assets.cpp)
+target_include_directories(environment_tests PRIVATE ../include ../extern/stb ../extern/tinyobjloader ../extern/tinygltf)
+target_link_libraries(environment_tests PRIVATE NXB::NexusBVH CUDA::cudart stdc++fs)
+add_test(NAME environment_tests COMMAND environment_tests ${CMAKE_CURRENT_BINARY_DIR}/environment_fixture)
+
+add_executable(environment_shading_tests environment_shading_tests.cu
+    ../src/scene/environment.cpp ../src/scene/obj_loader.cpp
+    ../src/core/rng.cu ../src/scene/scene.cu ../src/scene/bvh.cpp ../src/scene/bvh_sbvh.cpp)
+target_include_directories(environment_shading_tests PRIVATE ../include ../extern/stb ../extern/tinyobjloader)
+target_link_libraries(environment_shading_tests PRIVATE NXB::NexusBVH CUDA::cudart stdc++fs)
+set_target_properties(environment_shading_tests PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+add_test(NAME environment_shading_tests COMMAND environment_shading_tests)
+set_tests_properties(environment_shading_tests PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(gltf_support_tests gltf_support_tests.cpp
+    ../src/scene/gltf_loader.cpp ../src/scene/obj_loader.cpp)
+target_include_directories(gltf_support_tests PRIVATE ../include ../extern/tinygltf ../extern/tinyobjloader ../extern/stb)
+target_link_libraries(gltf_support_tests PRIVATE NXB::NexusBVH CUDA::cudart stdc++fs)
+add_test(NAME gltf_support_tests COMMAND gltf_support_tests ${CMAKE_CURRENT_BINARY_DIR}/gltf_support_fixture)
+
+add_executable(gltf_shading_tests gltf_shading_tests.cu
+    ../src/core/rng.cu ../src/scene/scene.cu ../src/scene/bvh.cpp ../src/scene/bvh_sbvh.cpp)
+target_include_directories(gltf_shading_tests PRIVATE ../include)
+target_link_libraries(gltf_shading_tests PRIVATE NXB::NexusBVH CUDA::cudart stdc++fs)
+set_target_properties(gltf_shading_tests PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+add_test(NAME gltf_shading_tests COMMAND gltf_shading_tests)
+set_tests_properties(gltf_shading_tests PROPERTIES SKIP_RETURN_CODE 77)
+
 add_executable(tile_scheduler_tests
     tile_scheduler_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/renderer/tile_scheduler.cpp

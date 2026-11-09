@@ -89,3 +89,32 @@ The denoiser's `lighting-study` command performs independent reference
 qualification, equal-budget control/diverse training, checkpoint freezing,
 and evaluation by lighting condition. Its camera partitions share geometry;
 they are labelled as a within-scene ablation, not a strict scene-disjoint test.
+
+## Planned 1080p dataset and frame resume
+
+The sibling denoiser repository's
+[`dataset_generation`](../../Path-Tracer-Denoiser/dataset_generation/README.md)
+contains scene-specific cameras, six trajectory types, independent scene splits,
+frame-resumable launch scripts, a `nohup` SSH launcher, and separate 1024/4096-SPP
+reference workflows. Capture remains local and uses uniform positive SPP.
+
+`dataset_capture` accepts an optional half-open frame range:
+
+```bash
+build/dataset_capture CONFIG.json OUTPUT --start-frame 2 --end-frame 8
+```
+
+The configuration still contains the complete original camera list. Rendering a
+subrange preserves frame numbers, preceding-camera motion guides and per-frame
+sample IDs. Only selected frame outputs must be absent; existing selected frames
+are rejected. The Python launcher validates/skips completed frames and invokes
+only missing ranges. The renderer itself does not trust/skip existing output,
+and does not checkpoint samples within an unfinished frame.
+
+An optional integer `sample_stride` in capture JSON reserves a fixed sample-ID
+interval per frame. It must be at least `samples + reference_samples`; its
+default is exactly that sum, preserving older captures. A stride of 8192 permits
+switching between 4+1024 and 4+4096 SPP without changing any noisy sample IDs.
+Input/reference ranges stay disjoint, and references at the lower budget are a
+prefix of the larger reference range. Metadata records the stride. This is not
+an independent reference replicate for convergence measurement.

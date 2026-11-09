@@ -121,7 +121,8 @@ std::vector<FrameGuide> captureGuides(Scene scene, Camera camera, Camera previou
     return guides;
 }
 
-int capture(const std::filesystem::path& configFile, const std::filesystem::path& output) {
+int capture(const std::filesystem::path& configFile, const std::filesystem::path& output,
+    uint32_t firstFrame, std::optional<uint32_t> endFrame) {
     std::ifstream input(configFile);
     if (!input)
         throw std::runtime_error("Cannot open capture configuration");
@@ -150,8 +151,15 @@ int capture(const std::filesystem::path& configFile, const std::filesystem::path
     uint32_t samples = integer(root, "samples", 4);
     uint32_t referenceSamples = integer(root, "reference_samples", 256);
     uint32_t sampleStart = integer(root, "sample_start", 0, true);
-    uint64_t stride = static_cast<uint64_t>(samples) + referenceSamples;
+    uint64_t requiredStride = static_cast<uint64_t>(samples) + referenceSamples;
+    uint64_t stride = integer(root, "sample_stride", static_cast<uint32_t>(
+        std::min<uint64_t>(requiredStride, std::numeric_limits<uint32_t>::max())));
+    if (stride < requiredStride)
+        throw std::invalid_argument("sample_stride must cover input and reference samples");
     uint64_t frameCount = root.at("frames").size();
+    uint64_t stop = endFrame ? *endFrame : frameCount;
+    if (firstFrame >= stop || stop > frameCount)
+        throw std::invalid_argument("Requested frame range is outside the capture sequence");
     if (frameCount > (std::numeric_limits<uint32_t>::max() - sampleStart) / stride ||
         config.width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
         config.height > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
@@ -183,6 +191,8 @@ int capture(const std::filesystem::path& configFile, const std::filesystem::path
             throw std::invalid_argument("capture_lighting currently supports only the demo preset");
         lighting = parseCaptureLighting(root.at("capture_lighting"));
     }
+    if (lighting && !sceneConfig.environmentFilename.empty())
+        throw std::invalid_argument("capture_lighting cannot be combined with a scene HDR environment");
     std::vector<Camera> cameras;
     std::vector<std::filesystem::path> directories;
     Camera defaultCamera = createSceneCamera(sceneConfig, config.width, config.height);
@@ -191,7 +201,8 @@ int capture(const std::filesystem::path& configFile, const std::filesystem::path
         std::ostringstream name;
         name << "frame_" << std::setw(6) << std::setfill('0') << i;
         directories.push_back(output / name.str());
-        if (std::filesystem::exists(directories.back()) || std::filesystem::exists(directories.back().string() + ".partial"))
+        if (i >= firstFrame && i < stop && (std::filesystem::exists(directories.back()) ||
+            std::filesystem::exists(directories.back().string() + ".partial")))
             throw std::invalid_argument("Capture output already exists: " + directories.back().string());
     }
     int deviceCount = 0;
@@ -218,7 +229,7 @@ int capture(const std::filesystem::path& configFile, const std::filesystem::path
         sceneIdentity = captureLightingFingerprint(sceneIdentity, *lighting);
     }
     auto tiles = createRenderTiles(config.width, config.height, config.tileWidth, config.tileHeight);
-    for (size_t i = 0; i < cameras.size(); ++i) {
+    for (size_t i = firstFrame; i < stop; ++i) {
         uint32_t start = static_cast<uint32_t>(sampleStart + i * stride);
         std::cout << "Capturing frame " << i << ": " << samples << " input + " << referenceSamples << " reference SPP\n";
         RenderDriver driver(scene.scene, cameras[i], config, sceneConfig);
@@ -243,7 +254,7 @@ int capture(const std::filesystem::path& configFile, const std::filesystem::path
             {"scene", sceneConfig.name}, {"render_fingerprint", fingerprintText.str()},
             {"scene_fingerprint", sceneFingerprintText.str()},
             {"render", {{"rng", "pcg32"}, {"rng_key", "pixel_sample_v1"},
-                {"sample_start", start}, {"samples", samples},
+                {"sample_start", start}, {"samples", samples}, {"sample_stride", stride},
                 {"reference_sample_start", start + samples}, {"reference_samples", referenceSamples},
                 {"max_depth", config.maxDepth}, {"russian_roulette_start_depth", config.russianRouletteStartDepth},
                 {"persistent_wavefront", config.persistentWavefront},
@@ -251,6 +262,12 @@ int capture(const std::filesystem::path& configFile, const std::filesystem::path
                 {"caustics", config.enableCaustics}, {"caustic_photons", config.causticPhotonCount},
                 {"caustic_radius", config.causticGatherRadius}, {"caustic_seed", 0x13579bdfu},
                 {"reference_estimator", "matched_renderer_settings"}}}};
+        metadata["render"]["integrator_version"] = rendererIntegratorVersion;
+        metadata["render"]["environment"] = {
+            {"enabled", !sceneConfig.environmentFilename.empty()},
+            {"intensity", sceneConfig.environmentIntensity},
+            {"rotation_degrees", sceneConfig.environmentRotationDegrees},
+            {"width", scene.scene.scene.environment.width}, {"height", scene.scene.scene.environment.height}};
         if (lighting) {
             std::ostringstream geometryIdentity;
             geometryIdentity << std::hex << computeSceneFingerprint(sceneConfig);
@@ -265,13 +282,30 @@ int capture(const std::filesystem::path& configFile, const std::filesystem::path
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 3 || std::string(argv[1]) == "--help") {
-        std::cout << "Usage: dataset_capture CONFIG.json OUTPUT_DIRECTORY\n"
+    std::cout.setf(std::ios::unitbuf);
+    if (argc < 3 || std::string(argv[1]) == "--help") {
+        std::cout << "Usage: dataset_capture CONFIG.json OUTPUT_DIRECTORY [--start-frame N] [--end-frame N]\n"
+                  << "Frame ranges are [start,end); motion always uses the original preceding camera.\n"
                   << "Run from the renderer root or build directory. Output directories must be new.\n";
         return argc == 2 && std::string(argv[1]) == "--help" ? 0 : 1;
     }
     try {
-        return capture(std::filesystem::absolute(argv[1]), std::filesystem::absolute(argv[2]));
+        uint32_t first = 0;
+        std::optional<uint32_t> end;
+        for (int i = 3; i < argc; i += 2) {
+            if (i + 1 == argc)
+                throw std::invalid_argument("Missing frame range value");
+            std::string value(argv[i + 1]);
+            if (value.empty() || value.find_first_not_of("0123456789") != std::string::npos)
+                throw std::invalid_argument("Frame range values must be nonnegative integers");
+            unsigned long long parsed = std::stoull(value);
+            if (parsed > std::numeric_limits<uint32_t>::max())
+                throw std::invalid_argument("Frame range value is too large");
+            if (std::string(argv[i]) == "--start-frame") first = static_cast<uint32_t>(parsed);
+            else if (std::string(argv[i]) == "--end-frame") end = static_cast<uint32_t>(parsed);
+            else throw std::invalid_argument("Unknown capture option: " + std::string(argv[i]));
+        }
+        return capture(std::filesystem::absolute(argv[1]), std::filesystem::absolute(argv[2]), first, end);
     } catch (const std::exception& exception) {
         std::cerr << "dataset_capture: " << exception.what() << '\n';
         return 1;

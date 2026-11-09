@@ -23,6 +23,7 @@ add_subdirectory(extern/NexusBVH)
 set(PATHTRACER_SOURCES
     src/config.cpp
     src/scene/scene_manifest.cpp
+    src/scene/environment.cpp
     src/core/rng.cu
     src/scene/camera.cu
     src/scene/scene.cu
@@ -56,10 +57,15 @@ set(PATHTRACER_SOURCES
 add_executable(pathtracer src/main.cu ${PATHTRACER_SOURCES})
 set(BENCHMARK_SOURCES ${PATHTRACER_SOURCES})
 list(FILTER BENCHMARK_SOURCES EXCLUDE REGEX "src/distributed/")
-add_executable(render_benchmark EXCLUDE_FROM_ALL benchmarks/render_benchmark.cpp ${BENCHMARK_SOURCES})
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/render_benchmark.cpp")
+    add_executable(render_benchmark EXCLUDE_FROM_ALL benchmarks/render_benchmark.cpp ${BENCHMARK_SOURCES})
+endif()
 
 option(PATHTRACER_BUILD_DATASET_CAPTURE "Build HDR denoising dataset capture tools (requires OpenEXR)" OFF)
-set(RENDERER_TARGETS pathtracer render_benchmark)
+set(RENDERER_TARGETS pathtracer)
+if(TARGET render_benchmark)
+    list(APPEND RENDERER_TARGETS render_benchmark)
+endif()
 if(PATHTRACER_BUILD_DATASET_CAPTURE)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(OPENEXR REQUIRED IMPORTED_TARGET OpenEXR)

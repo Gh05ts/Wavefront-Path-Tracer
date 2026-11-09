@@ -10,6 +10,7 @@
 #include <array>
 #include <filesystem>
 #include <iostream>
+#include <stdexcept>
 
 namespace
 {
@@ -234,6 +235,39 @@ void addNodeInstances(GltfScene& scene, const tinygltf::Model& model, const std:
     const tinygltf::Node& node = model.nodes[nodeIndex];
     std::array<double, 16> world = multiply(parent, getNodeMatrix(node));
 
+    if (node.light >= 0) {
+        if (static_cast<size_t>(node.light) >= model.lights.size())
+            throw std::runtime_error("glTF node references an invalid punctual light");
+        const tinygltf::Light& source = model.lights[node.light];
+        PunctualLight light;
+        if (source.type == "directional") light.type = PunctualLightType::Directional;
+        else if (source.type == "spot") light.type = PunctualLightType::Spot;
+        else if (source.type != "point") throw std::runtime_error("Unknown glTF punctual light type");
+        light.position = Vec3(world[12], world[13], world[14]);
+        light.direction = Vec3(-world[8], -world[9], -world[10]);
+        if (!(lengthSquared(light.direction) > 0.0f))
+            throw std::runtime_error("Degenerate glTF light transform");
+        light.direction = normalize(light.direction);
+        Vec3 color = source.color.empty() ? Vec3(1.0f, 1.0f, 1.0f) :
+            Vec3(source.color.at(0), source.color.at(1), source.color.at(2));
+        if (!std::isfinite(source.intensity) || source.intensity < 0.0 ||
+            !std::isfinite(source.range) || source.range < 0.0)
+            throw std::runtime_error("Invalid glTF light intensity or range");
+        if (!std::isfinite(color.x) || !std::isfinite(color.y) || !std::isfinite(color.z) ||
+            color.x < 0.0f || color.y < 0.0f || color.z < 0.0f)
+            throw std::runtime_error("Invalid glTF light color");
+        if (light.type == PunctualLightType::Spot &&
+            (!std::isfinite(source.spot.innerConeAngle) || !std::isfinite(source.spot.outerConeAngle) ||
+             source.spot.innerConeAngle < 0.0 || source.spot.outerConeAngle <= source.spot.innerConeAngle ||
+             source.spot.outerConeAngle > 1.5707963267948966))
+            throw std::runtime_error("Invalid glTF spotlight cone angles");
+        light.intensity = color * static_cast<float>(source.intensity);
+        light.range = static_cast<float>(source.range);
+        light.innerConeCos = cosf(source.spot.innerConeAngle);
+        light.outerConeCos = cosf(source.spot.outerConeAngle);
+        scene.punctualLights.push_back(light);
+    }
+
     if (node.mesh >= 0)
         for (uint32_t meshIndex : meshAssets[node.mesh])
             scene.instances.push_back(SceneInstance{meshIndex, makeTransform(world)});
@@ -314,6 +348,33 @@ GltfScene loadGltfScene(const char* filename) {
         material.metallicRoughnessTexture = getTextureBinding(source.pbrMetallicRoughness.metallicRoughnessTexture, model);
         material.emissiveTexture = getTextureBinding(source.emissiveTexture, model);
         material.normalTexture = getTextureBinding(source.normalTexture, model);
+        material.opacity = factor[3];
+        constexpr const char* specGloss = "KHR_materials_pbrSpecularGlossiness";
+        if (source.extensions.count(specGloss)) {
+            material.specularGlossinessWorkflow = true;
+            const auto& extension = source.extensions.at(specGloss);
+            material.albedo = Vec3(1.0f, 1.0f, 1.0f);
+            material.opacity = 1.0f;
+            if (extension.Has("diffuseFactor")) {
+                const auto& diffuse = extension.Get("diffuseFactor");
+                if (!diffuse.IsArray() || diffuse.ArrayLen() != 4)
+                    throw std::runtime_error("Invalid glTF specular-glossiness diffuseFactor");
+                material.albedo = Vec3(diffuse.Get(0).GetNumberAsDouble(),
+                    diffuse.Get(1).GetNumberAsDouble(), diffuse.Get(2).GetNumberAsDouble());
+                material.opacity = diffuse.Get(3).GetNumberAsDouble();
+            }
+            material.specular = getExtensionColor(source, specGloss, "specularFactor", Vec3(1.0f, 1.0f, 1.0f));
+            material.glossiness = getExtensionNumber(source, specGloss, "glossinessFactor", 1.0f);
+            material.albedoTexture = getExtensionTexture(source, specGloss, "diffuseTexture", model);
+            material.specularGlossinessTexture = getExtensionTexture(source, specGloss, "specularGlossinessTexture", model);
+            auto unit = [](float value) { return std::isfinite(value) && value >= 0.0f && value <= 1.0f; };
+            if (!unit(material.albedo.x) || !unit(material.albedo.y) || !unit(material.albedo.z) ||
+                !unit(material.opacity) || !unit(material.specular.x) || !unit(material.specular.y) ||
+                !unit(material.specular.z) || !unit(material.glossiness))
+                throw std::runtime_error("Invalid glTF specular-glossiness factors");
+            if (material.type == MaterialType::Diffuse)
+                material.type = MaterialType::SpecularGlossiness;
+        }
         scene.materials[i + 1] = material;
     }
     std::vector<std::vector<uint32_t>> meshAssets(model.meshes.size());
@@ -388,5 +449,11 @@ GltfScene loadGltfScene(const char* filename) {
         for (int nodeIndex : model.scenes[sceneIndex].nodes)
             addNodeInstances(scene, model, meshAssets, nodeIndex, identity);
 
+    size_t specGlossCount = 0;
+    for (const Material& material : scene.materials)
+        specGlossCount += material.specularGlossinessWorkflow;
+    std::cout << "Imported glTF: " << scene.meshes.size() << " mesh assets, " << scene.instances.size()
+              << " instances, " << specGlossCount << " specular-glossiness materials, "
+              << scene.punctualLights.size() << " punctual lights\n";
     return scene;
 }

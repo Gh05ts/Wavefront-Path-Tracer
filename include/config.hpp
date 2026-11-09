@@ -50,6 +50,9 @@ struct SceneConfig {
     int32_t objectMaterialOverride = -1;
     bool addSponzaTopLight = true, ignoreSponzaLightOcclusion = false, useNormalMaps = true;
     float normalMapMinimumCosine = 0.0f;
+    std::string environmentFilename;
+    float environmentIntensity = 1.0f;
+    float environmentRotationDegrees = 0.0f;
 };
 
 SceneConfig scenePreset(ScenePreset preset);

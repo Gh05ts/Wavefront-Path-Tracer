@@ -253,6 +253,8 @@ void appendWorkerConfiguration(Writer& writer, const DistributedWorkerConfigurat
     writer.u32(static_cast<uint32_t>(scene.objectMaterialOverride));
     appendBool(scene.addSponzaTopLight); appendBool(scene.ignoreSponzaLightOcclusion);
     appendBool(scene.useNormalMaps); writer.float32(scene.normalMapMinimumCosine);
+    writer.string(scene.environmentFilename);
+    writer.float32(scene.environmentIntensity); writer.float32(scene.environmentRotationDegrees);
 }
 
 bool readWorkerConfiguration(Reader& reader, DistributedWorkerConfiguration& configuration) {
@@ -294,8 +296,12 @@ bool readWorkerConfiguration(Reader& reader, DistributedWorkerConfiguration& con
         !readBool(scene.neutralRoom) || !readBool(scene.removeBackdrop) ||
         !readBool(scene.convertObjectMaterialsToDielectric) || !reader.u32(materialOverride) ||
         !readBool(scene.addSponzaTopLight) || !readBool(scene.ignoreSponzaLightOcclusion) ||
-        !readBool(scene.useNormalMaps) || !reader.float32(scene.normalMapMinimumCosine))
+        !readBool(scene.useNormalMaps) || !reader.float32(scene.normalMapMinimumCosine) ||
+        !reader.string(scene.environmentFilename) || !reader.float32(scene.environmentIntensity) ||
+        !reader.float32(scene.environmentRotationDegrees))
         return false;
+    if (!std::isfinite(scene.environmentIntensity) || scene.environmentIntensity < 0 ||
+        !std::isfinite(scene.environmentRotationDegrees)) return false;
     if (rngStrategy > static_cast<uint32_t>(RngStrategy::Pcg32) ||
         preset > static_cast<uint32_t>(ScenePreset::RtWeek) || objectSource > 2 ||
         lightProfile > 2 || acceleration > 4)

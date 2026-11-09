@@ -24,7 +24,8 @@ enum class MaterialType: uint32_t {
     Diffuse,
     Metal,
     Dielectric,
-    Emissive
+    Emissive,
+    SpecularGlossiness
 };
 
 struct Material {
@@ -48,4 +49,9 @@ struct Material {
     TextureBinding emissiveTexture;
     TextureBinding normalTexture;
     TextureBinding thicknessTexture;
+    Vec3 specular = Vec3(1.0f, 1.0f, 1.0f);
+    float glossiness = 1.0f;
+    float opacity = 1.0f;
+    TextureBinding specularGlossinessTexture;
+    bool specularGlossinessWorkflow = false;
 };

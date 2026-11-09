@@ -197,6 +197,13 @@ bool buildDistributedAssetCatalog(
     DistributedAssetCatalog& catalog,
     std::string* error) {
     catalog = DistributedAssetCatalog{};
+    if (!scene.environmentFilename.empty()) {
+        DistributedAssetFile environment;
+        environment.relativePath = distributedEnvironmentAssetPath;
+        environment.sourcePath = std::filesystem::absolute(scene.environmentFilename).lexically_normal().string();
+        if (!hashFile(environment.sourcePath, environment.byteSize, environment.checksum, error)) return false;
+        catalog.files.push_back(std::move(environment));
+    }
     const std::string primaryFilename = primaryAssetPath(scene);
     if (primaryFilename.empty() || primaryFilename.rfind("__", 0) == 0)
         return true;
@@ -226,6 +233,10 @@ bool buildDistributedAssetCatalog(
 
         DistributedAssetFile file;
         file.relativePath = relative.generic_string();
+        if (!scene.environmentFilename.empty() && file.relativePath == distributedEnvironmentAssetPath) {
+            setError(error, "scene asset collides with reserved environment cache path");
+            return false;
+        }
         file.sourcePath = path.string();
         if (!hashFile(path, file.byteSize, file.checksum, error))
             return false;

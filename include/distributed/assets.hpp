@@ -5,6 +5,7 @@
 #include <vector>
 
 struct SceneConfig;
+inline constexpr const char* distributedEnvironmentAssetPath = "__environment/map.hdr";
 
 struct DistributedAssetDescriptor {
     std::string relativePath;

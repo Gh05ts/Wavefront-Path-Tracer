@@ -6,6 +6,8 @@
 #include "geometry.cuh"
 #include "bvh.cuh"
 #include "material.cuh"
+#include "punctual_light.cuh"
+#include "environment.cuh"
 
 #include <NXB/BVH.h>
 
@@ -148,6 +150,10 @@ struct Scene {
     TriangleLight* lights;
     LightAliasEntry* lightAlias;
     uint32_t lightCount;
+    PunctualLight* punctualLights;
+    uint32_t punctualLightCount;
+    uint32_t directionalLightCount; // directional prefix in punctualLights
+    EnvironmentView environment;
     bool blackBackground;
     bool ignoreDirectLightOcclusion;
     bool useNormalMaps;
@@ -177,7 +183,12 @@ struct DeviceScene {
     TriangleLight* lights;
     LightAliasEntry* lightAlias;
     std::vector<TriangleLight> hostLights;
+    PunctualLight* punctualLights;
     std::vector<float> lightWeights;
+    cudaArray_t environmentArray = nullptr;
+    cudaTextureObject_t environmentTexture = 0;
+    float* environmentProbabilities = nullptr;
+    EnvironmentAlias* environmentAlias = nullptr;
     std::vector<cudaArray_t> textureArrays;
     std::vector<cudaTextureObject_t> textureObjects;
 };
@@ -228,3 +239,7 @@ DeviceScene createCornellScene(const CornellSceneOptions& options);
 DeviceScene createGltfScene(const char* filename, float sceneScale, bool addTopLight);
 
 void destroyDeviceScene(DeviceScene& deviceScene);
+
+struct HostEnvironment;
+void uploadEnvironmentMap(DeviceScene& scene, const HostEnvironment& map, float intensity, float rotationDegrees);
+void clearEnvironmentMap(DeviceScene& scene);

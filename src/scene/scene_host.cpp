@@ -257,6 +257,9 @@ HostScene assembleCornellScene(const CornellSceneOptions& options) {
         GltfScene source = loadGltfScene(options.filename);
         hostScene.meshes = std::move(source.meshes);
         gltfInstances = std::move(source.instances);
+        hostScene.punctualLights = std::move(source.punctualLights);
+        for (PunctualLight& light : hostScene.punctualLights)
+            light.position = options.objectScale * light.position + options.objectTranslation;
         objectMaterials = std::move(source.materials);
         hostScene.textures = std::move(source.textures);
     } else {
@@ -368,6 +371,10 @@ HostScene assembleGltfScene(const char* filename, float sceneScale, bool addTopL
         instance.transform.worldToLocalZ = instance.transform.worldToLocalZ / sceneScale;
         instance.transform.translation = sceneScale * instance.transform.translation;
     }
+
+    hostScene.punctualLights = std::move(source.punctualLights);
+    for (PunctualLight& light : hostScene.punctualLights)
+        light.position = sceneScale * light.position;
 
     if (addTopLight) {
         uint32_t lightMaterial = static_cast<uint32_t>(hostScene.materials.size());

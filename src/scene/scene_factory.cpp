@@ -1,4 +1,5 @@
 #include "scene/scene_factory.hpp"
+#include "scene/environment.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -96,4 +97,9 @@ void applySceneConfig(DeviceScene& deviceScene, const SceneConfig& config) {
         config.preset == ScenePreset::Sponza && config.ignoreSponzaLightOcclusion;
     deviceScene.scene.useNormalMaps = config.useNormalMaps;
     deviceScene.scene.normalMapMinimumCosine = config.normalMapMinimumCosine;
+    if (config.environmentFilename.empty())
+        clearEnvironmentMap(deviceScene);
+    else
+        uploadEnvironmentMap(deviceScene, loadEnvironmentMap(config.environmentFilename.c_str()),
+            config.environmentIntensity, config.environmentRotationDegrees);
 }

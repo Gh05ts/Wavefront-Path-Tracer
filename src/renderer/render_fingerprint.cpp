@@ -116,6 +116,12 @@ void appendSceneFingerprint(FingerprintBuilder& builder, const SceneConfig& scen
     builder.appendBool(scene.ignoreSponzaLightOcclusion);
     builder.appendBool(scene.useNormalMaps);
     builder.appendFloat(scene.normalMapMinimumCosine);
+    builder.appendBool(!scene.environmentFilename.empty());
+    if (!scene.environmentFilename.empty()) {
+        builder.appendAsset(scene.environmentFilename.c_str());
+        builder.appendFloat(scene.environmentIntensity);
+        builder.appendFloat(scene.environmentRotationDegrees);
+    }
 }
 
 void appendRenderFingerprint(FingerprintBuilder& builder, const RenderConfig& render) {
@@ -138,6 +144,7 @@ void appendRenderFingerprint(FingerprintBuilder& builder, const RenderConfig& re
     builder.appendFloat(render.causticGatherRadius);
     builder.appendU32(static_cast<uint32_t>(render.rngStrategy));
     builder.appendU32(rngImplementationVersion);
+    builder.appendU32(rendererIntegratorVersion);
 }
 } // namespace
 

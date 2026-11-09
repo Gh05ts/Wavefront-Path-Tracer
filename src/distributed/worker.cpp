@@ -261,7 +261,7 @@ bool DistributedWorkerClient::synchronizeAssets(
     std::string* error) {
     if (assets_.empty())
         return true;
-    if (primaryAssetPath_.empty()) {
+    if (primaryAssetPath_.empty() && scene.environmentFilename.empty()) {
         setError(error, "coordinator asset catalog has no primary asset path");
         return false;
     }
@@ -328,6 +328,17 @@ bool DistributedWorkerClient::synchronizeAssets(
             }
         }
 
+        if (!scene.environmentFilename.empty()) {
+            bool foundEnvironment = false;
+            for (const auto& asset : assets_)
+                foundEnvironment |= asset.relativePath == distributedEnvironmentAssetPath;
+            if (!foundEnvironment) {
+                setError(error, "coordinator asset catalog is missing the HDR environment");
+                return false;
+            }
+            scene.environmentFilename = (cacheRoot / distributedEnvironmentAssetPath).lexically_normal().string();
+        }
+        if (primaryAssetPath_.empty()) return true; // procedural scene with environment only
         if (!safeAssetPath(primaryAssetPath_)) {
             setError(error, "coordinator sent an unsafe primary asset path");
             return false;

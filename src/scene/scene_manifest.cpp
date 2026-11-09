@@ -143,6 +143,32 @@ bool loadSceneManifest(const char* filename, SceneConfig& scene, std::string* er
         }
 
         loaded.gltfScale = root.value("gltf_scale", loaded.gltfScale);
+        if (root.contains("environment")) {
+            const Json& environment = root.at("environment");
+            if (!environment.is_object() || !environment.contains("file") ||
+                !environment.at("file").is_string() || environment.at("file").get<std::string>().empty()) {
+                setError(error, "scene environment requires a nonempty file path");
+                return false;
+            }
+            for (auto it = environment.begin(); it != environment.end(); ++it)
+                if (it.key() != "file" && it.key() != "intensity" && it.key() != "rotation_degrees") {
+                    setError(error, "unknown scene environment field: " + it.key());
+                    return false;
+                }
+            loaded.environmentFilename = resolveAssetPath(manifestPath, environment.at("file").get<std::string>());
+            for (const char* key : {"intensity", "rotation_degrees"})
+                if (environment.contains(key) && !environment.at(key).is_number()) {
+                    setError(error, std::string("environment.") + key + " must be numeric");
+                    return false;
+                }
+            loaded.environmentIntensity = environment.value("intensity", 1.0f);
+            loaded.environmentRotationDegrees = environment.value("rotation_degrees", 0.0f);
+            if (!std::isfinite(loaded.environmentIntensity) || loaded.environmentIntensity < 0 ||
+                !std::isfinite(loaded.environmentRotationDegrees)) {
+                setError(error, "environment intensity must be finite/nonnegative and rotation finite");
+                return false;
+            }
+        }
         if (root.contains("room")) {
             const Json& room = root["room"];
             if (!room.is_object()) {

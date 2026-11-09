@@ -1,4 +1,5 @@
 #pragma once
+#include "specular_glossiness.cuh"
 
 // Header-backed device traversal and material lookup implementation. It is
 // included by renderer.cu to preserve the existing kernel compilation unit.
@@ -341,20 +342,29 @@ Vec3 srgbToLinear(const float4& texel) {
     return Vec3(powf(srgb.x, 2.2f), powf(srgb.y, 2.2f), powf(srgb.z, 2.2f));
 }
 
+__host__ __device__ inline float gltfSrgbChannel(float value) {
+    return value <= 0.04045f ? value / 12.92f : powf((value + 0.055f) / 1.055f, 2.4f);
+}
+
+__device__ Vec3 gltfSrgbToLinear(const float4& texel) {
+    return Vec3(gltfSrgbChannel(texel.x), gltfSrgbChannel(texel.y), gltfSrgbChannel(texel.z));
+}
+
 __device__
 Vec3 getMaterialAlbedo(const Material& material, const Hit& hit, Scene scene) {
-    return hadamard(material.albedo, srgbToLinear(sampleTexture(material.albedoTexture, hit, scene, make_float4(1.0f, 1.0f, 1.0f, 1.0f))));
+    float4 texel = sampleTexture(material.albedoTexture, hit, scene, make_float4(1.0f, 1.0f, 1.0f, 1.0f));
+    return hadamard(material.albedo, material.specularGlossinessWorkflow ? gltfSrgbToLinear(texel) : srgbToLinear(texel));
 }
 
 __device__
 float getMaterialOpacity(const Material& material, const Vec2& uv, const Vec2& uv1, Scene scene) {
     if (material.albedoTexture.texture == invalidTextureIndex || material.albedoTexture.texture >= scene.textureCount)
-        return 1.0f;
+        return material.opacity;
 
     Hit hit{};
     hit.uv = uv;
     hit.uv1 = uv1;
-    return sampleTexture(material.albedoTexture, hit, scene, make_float4(1.0f, 1.0f, 1.0f, 1.0f)).w;
+    return material.opacity * sampleTexture(material.albedoTexture, hit, scene, make_float4(1.0f, 1.0f, 1.0f, 1.0f)).w;
 }
 
 __device__
@@ -369,7 +379,23 @@ float getMaterialMetallic(const Material& material, const Hit& hit, Scene scene)
 
 __device__
 float getMaterialRoughness(const Material& material, const Hit& hit, Scene scene) {
+    if (material.specularGlossinessWorkflow)
+        return 1.0f - material.glossiness * sampleTexture(material.specularGlossinessTexture, hit, scene, make_float4(1.0f, 1.0f, 1.0f, 1.0f)).w;
     return material.roughness * sampleTexture(material.metallicRoughnessTexture, hit, scene, make_float4(1.0f, 1.0f, 1.0f, 1.0f)).y;
+}
+
+__device__ SpecularGlossinessSurface getSpecGlossSurface(const Material& material, const Hit& hit, Scene scene) {
+    float4 texel = sampleTexture(material.specularGlossinessTexture, hit, scene, make_float4(1.0f, 1.0f, 1.0f, 1.0f));
+    return SpecularGlossinessSurface{getMaterialAlbedo(material, hit, scene),
+        hadamard(material.specular, gltfSrgbToLinear(texel)), getMaterialRoughness(material, hit, scene)};
+}
+
+__device__ Vec3 evaluateSurface(const Material& material, const Hit& hit, Scene scene,
+    const Vec3& outgoing, const Vec3& incoming, float& pdf) {
+    if (material.type == MaterialType::SpecularGlossiness)
+        return evaluateSpecGloss(getSpecGlossSurface(material, hit, scene), hit.normal, outgoing, incoming, pdf);
+    pdf = fmaxf(0.0f, dot(hit.normal, incoming)) * 0.31830988618f;
+    return getMaterialAlbedo(material, hit, scene) * 0.31830988618f;
 }
 
 __device__
@@ -459,13 +485,94 @@ void sampleDirectLight(PathState& path, const Hit& hit, const Hit& shadedHit, co
         return;
 
     const Material& lightMaterial = scene.materials[light.material];
-    constexpr float inversePi = 0.31830988618f;
     float geometryTerm = shadingCosine * lightCosine * light.area / (distanceSquared * light.selectionPdf);
     float lightPdf = light.selectionPdf * distanceSquared / (lightCosine * light.area);
-    float bsdfPdf = shadingCosine * inversePi;
+    float bsdfPdf;
+    Vec3 bsdf = evaluateSurface(material, shadedHit, scene, -path.ray.direction, direction, bsdfPdf);
     float misWeight = powerHeuristic(lightPdf, bsdfPdf);
-    Vec3 directLighting = hadamard(getMaterialAlbedo(material, shadedHit, scene), lightMaterial.emission) * (inversePi * geometryTerm * misWeight);
+    Vec3 directLighting = hadamard(bsdf, lightMaterial.emission) * (geometryTerm * misWeight);
     path.radiance += hadamard(path.throughput, directLighting);
+}
+
+__device__ Vec3 environmentRadiance(const EnvironmentView& map, const Vec3& direction) {
+    Vec2 uv = environmentUv(direction, map.rotation);
+    float4 texel = tex2D<float4>(map.texture, uv.x, uv.y);
+    return Vec3(texel.x, texel.y, texel.z) * map.intensity;
+}
+
+__device__ void addEnvironmentOrSky(PathState& path, Scene scene) {
+    if (scene.environment.texture) {
+        float weight = path.depth > 0 && !path.specularBounce ?
+            powerHeuristic(path.previousBsdfPdf, environmentPdf(scene.environment, path.ray.direction)) : 1.0f;
+        path.radiance += hadamard(path.throughput, environmentRadiance(scene.environment, path.ray.direction)) * weight;
+    } else if (!scene.blackBackground) {
+        float t = 0.5f * (path.ray.direction.y + 1.0f);
+        Vec3 sky = (1.0f-t)*Vec3(1.0f,1.0f,1.0f) + t*Vec3(0.5f,0.7f,1.0f);
+        path.radiance += hadamard(path.throughput, sky);
+    }
+}
+
+__device__ void sampleDirectEnvironment(PathState& path, const Hit& hit, const Hit& shadedHit,
+    const Material& material, Scene scene) {
+    const EnvironmentView& map = scene.environment;
+    if (!map.texture || map.intensity == 0.0f) return;
+    float coarse = randomFloat(path.rngState), fine = randomFloat(path.rngState);
+    double candidate = double(coarse) + double(fine)*(1.0/16777216.0);
+    float coin = randomFloat(path.rngState);
+    float u = randomFloat(path.rngState), v = randomFloat(path.rngState);
+    EnvironmentSample light = sampleEnvironment(map, candidate, coin, u, v);
+    float cosine = dot(shadedHit.normal, light.direction);
+    if (cosine <= 0.0f || dot(hit.geometricNormal, light.direction) <= 0.0f || !(light.pdf > 0.0f)) return;
+    Ray shadow(hit.position + hit.geometricNormal * 0.001f, light.direction);
+    if (!scene.ignoreDirectLightOcclusion && isOccluded(shadow, 1.0e30f, scene)) return;
+    float bsdfPdf;
+    Vec3 bsdf = evaluateSurface(material, shadedHit, scene, -path.ray.direction, light.direction, bsdfPdf);
+    float weight = powerHeuristic(light.pdf, bsdfPdf);
+    Vec3 direct = hadamard(bsdf, environmentRadiance(map, light.direction)) * (cosine * weight / light.pdf);
+    path.radiance += hadamard(path.throughput, direct);
+}
+
+__device__ void addPunctualLight(PathState& path, const Hit& hit, const Hit& shadedHit,
+    const Material& material, Scene scene, const PunctualLight& source, float inverseSelectionPdf) {
+    PunctualLightSample light = samplePunctualLight(source, hit.position);
+    float cosine = dot(shadedHit.normal, light.direction);
+    if (cosine <= 0.0f || dot(hit.geometricNormal, light.direction) <= 0.0f ||
+        lengthSquared(light.incident) == 0.0f) return;
+    Ray shadow(hit.position + hit.geometricNormal * 0.001f, light.direction);
+    if (!scene.ignoreDirectLightOcclusion && isOccluded(shadow, light.distance - 0.002f, scene)) return;
+    float ignoredPdf;
+    Vec3 bsdf = evaluateSurface(material, shadedHit, scene, -path.ray.direction, light.direction, ignoredPdf);
+    // Delta lights cannot be reached by BSDF direction sampling: no MIS weight.
+    Vec3 direct = hadamard(bsdf, light.incident) * (cosine * inverseSelectionPdf);
+    path.radiance += hadamard(path.throughput, direct);
+}
+
+__device__ void sampleDirectPunctualLight(PathState& path, const Hit& hit, const Hit& shadedHit,
+    const Material& material, Scene scene) {
+    for (uint32_t i = 0; i < scene.directionalLightCount; ++i)
+        addPunctualLight(path, hit, shadedHit, material, scene, scene.punctualLights[i], 1.0f);
+    uint32_t count = scene.punctualLightCount - scene.directionalLightCount;
+    if (count == 0) return;
+    uint32_t index = scene.directionalLightCount + min(static_cast<uint32_t>(randomFloat(path.rngState) * count), count - 1);
+    addPunctualLight(path, hit, shadedHit, material, scene, scene.punctualLights[index], static_cast<float>(count));
+}
+
+__device__ Vec3 continueSpecGloss(PathState& path, const Hit& hit, const Hit& shadedHit,
+    const Material& material, Scene scene) {
+    SpecularGlossinessSurface surface = getSpecGlossSurface(material, shadedHit, scene);
+    Vec3 outgoing = -path.ray.direction;
+    float choice = randomFloat(path.rngState), u = randomFloat(path.rngState), v = randomFloat(path.rngState);
+    Vec3 direction = sampleSpecGloss(surface, shadedHit.normal, outgoing, choice, u, v);
+    float pdf;
+    Vec3 bsdf = evaluateSpecGloss(surface, shadedHit.normal, outgoing, direction, pdf);
+    if (!(pdf > 0.0f) || dot(direction, hit.geometricNormal) <= 0.0f) {
+        path.active = false;
+        return direction;
+    }
+    path.throughput = hadamard(path.throughput, bsdf) * (fmaxf(0.0f, dot(shadedHit.normal, direction)) / pdf);
+    path.previousBsdfPdf = pdf;
+    path.specularBounce = false; // finite GGX, participates in area-light MIS
+    return direction;
 }
 
 __device__ __forceinline__

@@ -67,7 +67,7 @@ inline CaptureLighting parseCaptureLighting(const nlohmann::json& root) {
 }
 
 inline void applyCaptureLighting(HostScene& scene, const CaptureLighting& lighting) {
-    if (!scene.lights.empty())
+    if (!scene.lights.empty() || !scene.punctualLights.empty())
         throw std::invalid_argument("Capture lighting expects a scene without explicit lights");
     scene.blackBackground = !lighting.sky;
     if (!lighting.area) return;
