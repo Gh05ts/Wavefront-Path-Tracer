@@ -142,6 +142,7 @@ void appendRenderFingerprint(FingerprintBuilder& builder, const RenderConfig& re
     builder.appendU32(render.causticPhotonCount);
     builder.appendU32(render.causticMaxDepth);
     builder.appendFloat(render.causticGatherRadius);
+    builder.appendFloat(render.indirectRadianceClamp);
     builder.appendU32(static_cast<uint32_t>(render.rngStrategy));
     builder.appendU32(rngImplementationVersion);
     builder.appendU32(rendererIntegratorVersion);

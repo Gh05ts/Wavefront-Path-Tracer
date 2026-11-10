@@ -1,0 +1,239 @@
+--- a/include/renderer/device_traversal.cuh
++++ b/include/renderer/device_traversal.cuh
+@@ -90,7 +90,7 @@
+ }
+ 
+ __device__
+-Vec3 getTriangleNormal(const Triangle& triangle, const Ray& ray, float u, float v) {
++Vec3 getTriangleNormal(const Triangle& triangle, const Ray& ray, float u, float v, bool faceForward = true) {
+     Vec3 normal;
+ 
+     if (triangle.hasVertexNormals)
+@@ -98,13 +98,15 @@
+     else
+         normal = normalize(cross(triangle.v1 - triangle.v0, triangle.v2 - triangle.v0));
+ 
+-    return dot(normal, ray.direction) > 0.0f ? -normal : normal;
+-}
+-
+-__device__
+-Vec3 getTriangleGeometricNormal(const Triangle& triangle, const Ray& ray) {
++    // Dielectrics retain their boundary orientation to distinguish entry/exit.
++    return faceForward && dot(normal, ray.direction) > 0.0f ? -normal : normal;
++}
++
++__device__
++Vec3 getTriangleGeometricNormal(const Triangle& triangle, const Ray& ray, bool faceForward = true) {
+     Vec3 normal = normalize(cross(triangle.v1 - triangle.v0, triangle.v2 - triangle.v0));
+-    return dot(normal, ray.direction) > 0.0f ? -normal : normal;
++    // Dielectrics retain their boundary orientation to distinguish entry/exit.
++    return faceForward && dot(normal, ray.direction) > 0.0f ? -normal : normal;
+ }
+ 
+ __device__
+@@ -142,8 +144,8 @@
+ 
+     closestT = t;
+     closestMaterial = static_cast<int>(materialIndex);
+-    closestGeometricNormal = getTriangleGeometricNormal(triangle, ray);
+-    closestNormal = getTriangleNormal(triangle, ray, u, v);
++    closestGeometricNormal = getTriangleGeometricNormal(triangle, ray, scene.materials[materialIndex].type != MaterialType::Dielectric);
++    closestNormal = getTriangleNormal(triangle, ray, u, v, scene.materials[materialIndex].type != MaterialType::Dielectric);
+     closestUv = uv;
+     closestUv1 = uv1;
+     if (triangle.hasVertexTangents) {
+@@ -257,8 +259,8 @@
+ 
+                 closestT = t;
+                 closestMaterial = static_cast<int>(materialIndex);
+-                closestGeometricNormal = getTriangleGeometricNormal(triangle, ray);
+-                closestNormal = getTriangleNormal(triangle, ray, u, v);
++                closestGeometricNormal = getTriangleGeometricNormal(triangle, ray, scene.materials[materialIndex].type != MaterialType::Dielectric);
++                closestNormal = getTriangleNormal(triangle, ray, u, v, scene.materials[materialIndex].type != MaterialType::Dielectric);
+                 closestUv = uv;
+                 closestUv1 = uv1;
+                 if (triangle.hasVertexTangents) {
+@@ -394,6 +396,14 @@
+     const Vec3& outgoing, const Vec3& incoming, float& pdf) {
+     if (material.type == MaterialType::SpecularGlossiness)
+         return evaluateSpecGloss(getSpecGlossSurface(material, hit, scene), hit.normal, outgoing, incoming, pdf);
++    MaterialType effective = material.type == MaterialType::Diffuse &&
++        getMaterialMetallic(material, hit, scene) > 0.5f ? MaterialType::Metal : material.type;
++    if (effective == MaterialType::Metal) {
++        if (getMaterialRoughness(material, hit, scene) <= 0.0f) { pdf = 0.0f; return Vec3(); }
++        SpecularGlossinessSurface surface{Vec3(), getMaterialAlbedo(material, hit, scene),
++            getMaterialRoughness(material, hit, scene)};
++        return evaluateSpecGloss(surface, hit.normal, outgoing, incoming, pdf);
++    }
+     pdf = fmaxf(0.0f, dot(hit.normal, incoming)) * 0.31830988618f;
+     return getMaterialAlbedo(material, hit, scene) * 0.31830988618f;
+ }
+@@ -557,9 +567,12 @@
+     addPunctualLight(path, hit, shadedHit, material, scene, scene.punctualLights[index], static_cast<float>(count));
+ }
+ 
+-__device__ Vec3 continueSpecGloss(PathState& path, const Hit& hit, const Hit& shadedHit,
++__device__ Vec3 continueGlossySurface(PathState& path, const Hit& hit, const Hit& shadedHit,
+     const Material& material, Scene scene) {
+-    SpecularGlossinessSurface surface = getSpecGlossSurface(material, shadedHit, scene);
++    SpecularGlossinessSurface surface = material.type == MaterialType::SpecularGlossiness ?
++        getSpecGlossSurface(material, shadedHit, scene) :
++        SpecularGlossinessSurface{Vec3(), getMaterialAlbedo(material, shadedHit, scene),
++            getMaterialRoughness(material, shadedHit, scene)};
+     Vec3 outgoing = -path.ray.direction;
+     float choice = randomFloat(path.rngState), u = randomFloat(path.rngState), v = randomFloat(path.rngState);
+     Vec3 direction = sampleSpecGloss(surface, shadedHit.normal, outgoing, choice, u, v);
+--- a/include/renderer/device_path_shading.cuh
++++ b/include/renderer/device_path_shading.cuh
+@@ -113,11 +113,18 @@
+                     sampleDirectLight(path, hit, shadedHit, material, scene);
+                     sampleDirectPunctualLight(path, hit, shadedHit, material, scene);
+                     sampleDirectEnvironment(path, hit, shadedHit, material, scene);
+-                    direction = continueSpecGloss(path, hit, shadedHit, material, scene);
++                    direction = continueGlossySurface(path, hit, shadedHit, material, scene);
+                     break;
+                 }
+ 
+                 case MaterialType::Metal: {
++                    if (roughness > 0.0f) {
++                        sampleDirectLight(path, hit, shadedHit, material, scene);
++                        sampleDirectPunctualLight(path, hit, shadedHit, material, scene);
++                        sampleDirectEnvironment(path, hit, shadedHit, material, scene);
++                        direction = continueGlossySurface(path, hit, shadedHit, material, scene);
++                        break;
++                    }
+                     path.throughput = hadamard(path.throughput, albedo);
+                     Vec3 reflected = reflect(normalize(path.ray.direction), shadedHit.normal);
+                     direction = normalize(reflected + roughness * randomInUnitSphere(path.rngState));
+@@ -294,11 +301,18 @@
+         sampleDirectLight(path, hit, shadedHit, material, scene);
+         sampleDirectPunctualLight(path, hit, shadedHit, material, scene);
+         sampleDirectEnvironment(path, hit, shadedHit, material, scene);
+-        direction = continueSpecGloss(path, hit, shadedHit, material, scene);
++        direction = continueGlossySurface(path, hit, shadedHit, material, scene);
+         break;
+     }
+ 
+     case MaterialType::Metal: {
++        if (roughness > 0.0f) {
++            sampleDirectLight(path, hit, shadedHit, material, scene);
++            sampleDirectPunctualLight(path, hit, shadedHit, material, scene);
++            sampleDirectEnvironment(path, hit, shadedHit, material, scene);
++            direction = continueGlossySurface(path, hit, shadedHit, material, scene);
++            break;
++        }
+         path.throughput = hadamard(path.throughput, albedo);
+         Vec3 reflected = reflect(normalize(path.ray.direction), shadedHit.normal);
+         direction = normalize(reflected + roughness * randomInUnitSphere(path.rngState));
+--- a/include/renderer/render_fingerprint.hpp
++++ b/include/renderer/render_fingerprint.hpp
+@@ -3,7 +3,7 @@
+ #include <cstdint>
+ 
+ #include "../config.hpp"
+-inline constexpr uint32_t rendererIntegratorVersion = 3;
++inline constexpr uint32_t rendererIntegratorVersion = 4;
+ 
+ uint64_t computeRenderFingerprint(const RenderConfig& render, const SceneConfig& scene);
+ 
+--- a/src/renderer/photon_mapping.cu
++++ b/src/renderer/photon_mapping.cu
+@@ -56,8 +56,8 @@
+         if (material.type == MaterialType::Metal) {
+             direction = normalize(reflect(normalize(ray.direction), normal));
+         } else if (material.type == MaterialType::Dielectric) {
+-            bool frontFace = dot(ray.direction, normal) < 0.0f;
+-            Vec3 interfaceNormal = frontFace ? normal : -normal;
++            bool frontFace = dot(ray.direction, hit.normal) < 0.0f;
++            Vec3 interfaceNormal = normal; // already faces the incident ray
+             float ior = material.ior;
+             if (material.dispersion > 0.0f && photon.spectralChannel < 3) {
+                 float channelOffset = static_cast<float>(photon.spectralChannel) - 1.0f;
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -208,3 +208,10 @@
+     target_link_libraries(frame_export_tests PRIVATE CUDA::cudart OpenSSL::Crypto PkgConfig::OPENEXR stdc++fs)
+     add_test(NAME frame_export_tests COMMAND frame_export_tests)
+ endif()
++
++add_executable(material_transport_tests material_transport_tests.cu ../src/core/rng.cu)
++target_include_directories(material_transport_tests PRIVATE ../include)
++target_link_libraries(material_transport_tests PRIVATE NXB::NexusBVH CUDA::cudart)
++set_target_properties(material_transport_tests PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
++add_test(NAME material_transport_tests COMMAND material_transport_tests)
++set_tests_properties(material_transport_tests PROPERTIES SKIP_RETURN_CODE 77)
+--- /dev/null
++++ b/tests/material_transport_tests.cu
+@@ -0,0 +1,72 @@
++#include "renderer/renderer.cuh"
++#include "core/rng.cuh"
++#include "renderer/device_sampling.cuh"
++#include "renderer/device_traversal.cuh"
++#include <iostream>
++
++// No loaded assets: exercise both sides of actual triangle intersections and
++// test refraction through a parallel glass slab against Snell's law.
++__global__ void checkMaterialTransport(int* failure) {
++    *failure = 0;
++    Material materials[2]{};
++    materials[0].type = MaterialType::Dielectric;
++    materials[0].ior = 1.5f;
++    materials[0].albedo = Vec3(1,1,1);
++    materials[1].type = MaterialType::Diffuse; // glTF metals resolve at shading
++    materials[1].metallic = 1;
++    materials[1].roughness = .47f;
++    materials[1].albedo = Vec3(.9f,.8f,.7f);
++    Triangle triangles[2]{};
++    triangles[0].v0 = Vec3(-2,-2,0);
++    triangles[0].v1 = Vec3(2,-2,0);
++    triangles[0].v2 = Vec3(0,2,0);
++    triangles[1].v0 = Vec3(-2,-2,-1);
++    triangles[1].v1 = Vec3(0,2,-1);
++    triangles[1].v2 = Vec3(2,-2,-1);
++    Scene scene{};
++    scene.triangles = triangles; scene.triangleCount = 2;
++    scene.materials = materials;
++    Vec3 incident(.3f,0,-sqrtf(.91f));
++    auto entry = traceRay(Ray(Vec3(0,0,1),incident),scene);
++    if (!entry.didHit || dot(incident,entry.hit.normal) >= 0) { *failure=1; return; }
++    auto inside = refract(incident,entry.hit.normal,1/materials[0].ior);
++    auto exit = traceRay(Ray(entry.hit.position+inside*.01f,inside),scene);
++    if (!exit.didHit || dot(inside,exit.hit.normal) <= 0) { *failure=2; return; }
++    auto outside = refract(inside,-exit.hit.normal,materials[0].ior);
++    if (length(outside-incident) > 1e-5f) { *failure=3; return; }
++    // Preserve the existing two-sided shading convention for opaque surfaces.
++    materials[0].type = MaterialType::Diffuse;
++    exit = traceRay(Ray(Vec3(0,0,-.5f),Vec3(0,0,1)),scene);
++    if (!exit.didHit || dot(exit.hit.normal,Vec3(0,0,1)) >= 0) { *failure=4; return; }
++    Hit hit{}; hit.normal = hit.geometricNormal = Vec3(0,0,1);
++    SpecularGlossinessSurface metal{Vec3(),materials[1].albedo,materials[1].roughness};
++    float pdf,expectedPdf;
++    Vec3 actual = evaluateSurface(materials[1],hit,scene,hit.normal,hit.normal,pdf);
++    Vec3 expected = evaluateSpecGloss(metal,hit.normal,hit.normal,hit.normal,expectedPdf);
++    if (fabsf(pdf-expectedPdf)>1e-5f || length(actual-expected)>1e-5f) { *failure=5; return; }
++    PathState path{}; path.active=true; path.specularBounce=true;
++    path.ray.direction=-hit.normal; path.throughput=Vec3(1,1,1);
++    path.rngState=makeRngState(42,RngStrategy::Pcg32);
++    continueGlossySurface(path,hit,hit,materials[1],scene);
++    if (!path.active || path.specularBounce || !(path.previousBsdfPdf>0)) { *failure=6; return; }
++    // Zero-roughness metal remains a delta, with no finite-density NEE lobe.
++    materials[1].roughness=0;
++    actual=evaluateSurface(materials[1],hit,scene,hit.normal,hit.normal,pdf);
++    if (pdf!=0 || lengthSquared(actual)!=0) { *failure=7; return; }
++}
++
++int main() {
++    int count=0;
++    if (cudaGetDeviceCount(&count)!=cudaSuccess || count==0) return 77;
++    int* failure=nullptr;
++    if (cudaMalloc(&failure,sizeof(int))!=cudaSuccess) return 1;
++    checkMaterialTransport<<<1,1>>>(failure);
++    int result=-1;
++    auto status=cudaMemcpy(&result,failure,sizeof(int),cudaMemcpyDeviceToHost);
++    cudaFree(failure);
++    if (status!=cudaSuccess || result!=0) {
++        std::cerr<<"Material transport regression failed: "<<result<<'\n'; return 1;
++    }
++    std::cout<<"Glass entry/exit, Snell slab, rough-metal PDF and delta-limit checks passed\n";
++    return 0;
++}

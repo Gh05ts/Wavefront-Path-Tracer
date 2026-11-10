@@ -1,5 +1,6 @@
 #include "scene/gltf_loader.hpp"
 #include "renderer/specular_glossiness.cuh"
+#include "renderer/gltf_pbr.cuh"
 #include "json.hpp"
 
 #include <cmath>
@@ -69,6 +70,67 @@ void testBsdf() {
     }
     require(std::abs(integral/count - sampled/count) < .01, "BSDF sampling estimator disagrees with quadrature");
     require(sampled/count > .4 && sampled/count < 1.0, "BSDF energy sanity");
+}
+
+void testPbrBsdf() {
+    const Vec3 n(0,0,1),view=normalize(Vec3(.3f,0,1));
+    GltfPbrSurface s{Vec3(.5f,.3f,.1f),n,n,.3f,.55f,Vec3(.04f,.04f,.04f),1,.8f,.4f};
+    std::mt19937 generator(139);
+    std::uniform_real_distribution<float> uniform(0,1);
+    double reference=0,estimate=0;
+    constexpr double pi=3.14159265358979323846;
+    constexpr int count=300000;
+    // Independent double-precision BRDF integral (no production D/G/F calls).
+    auto kernel=[](double nv,double nl,double nh,double rough) {
+        double a2=rough*rough*rough*rough;
+        double d=a2/(pi*std::pow(1-nh*nh+a2*nh*nh,2));
+        auto g=[a2](double z){return 2*z/(z+std::sqrt(a2+(1-a2)*z*z));};
+        return d*g(nv)*g(nl)/(4*nv*nl);
+    };
+    double nv=dot(n,view),coat=.8*(.04+.96*std::pow(1-nv,5));
+    for (int i=0;i<count;++i) {
+        double z=uniform(generator),phi=2*pi*uniform(generator),r=std::sqrt(1-z*z);
+        Vec3 light(r*std::cos(phi),r*std::sin(phi),z),half=normalize(view+light);
+        double vh=dot(view,half),nh=half.z,w=std::pow(1-vh,5);
+        double fd=.04+.96*w,fm=.5+.5*w;
+        double base=(1-.3)*(1-fd)*.5/pi + ((1-.3)*fd+.3*fm)*kernel(nv,z,nh,.55);
+        reference+=((1-coat)*base+coat*kernel(nv,z,nh,.4))*z*2*pi;
+        float choice=uniform(generator),u=uniform(generator),v=uniform(generator);
+        auto weights=pbrWeights(s,view);
+        if (choice<weights.coat) light=pbrSampleReflection(n,view,s.coatRoughness,u,v);
+        else if (choice<weights.coat+weights.specular) light=pbrSampleReflection(n,view,s.roughness,u,v);
+        else light=specGlossBasis(n,std::sqrt(u)*cosf(2*pi*v),std::sqrt(u)*sinf(2*pi*v),std::sqrt(1-u));
+        float pdf;
+        Vec3 value=evaluateGltfPbrCos(s,view,light,fmaxf(0.f,light.z)/pi,pdf);
+        if (pdf>0) estimate+=value.x/pdf;
+    }
+    require(std::abs(reference/count-estimate/count)<.007,"glTF layered sampler disagrees with independent quadrature");
+    require(estimate/count>0 && estimate/count<1,"glTF layered energy sanity");
+    // Factor zero really disables grazing reflection; no metal threshold.
+    s.metallic=0;s.coat=0;s.dielectricF0=Vec3();s.dielectricF90=0;
+    float pdf;Vec3 value=evaluateGltfPbrCos(s,n,n,1/pi,pdf);
+    require(near(value.x,.5/pi)&&near(pdf,1/pi),"Specular zero must recover Lambert exactly");
+    s.metallic=.25f;s.roughness=0;s.coat=1;s.coatRoughness=0;
+    auto weights=pbrWeights(s,n);
+    require(near(weights.diffuse,.96*.75)&&near(weights.specular,.96*.25)&&near(weights.coat,.04),"Mixed metal/coat delta selection masses");
+    value=evaluateGltfPbrCos(s,n,n,1/pi,pdf);
+    require(near(value.x,.96*.75*.5/pi)&&near(pdf,.96*.75/pi),"Delta lobes must be excluded from finite NEE/PDF");
+    s.metallic=1;s.coat=0;
+    value=evaluateGltfPbrCos(s,n,n,1/pi,pdf);
+    require(lengthSquared(value)==0&&pdf==0,"Perfect metal must retain an exact delta");
+    // BMW inner chrome can have a nearly grazing smooth normal while the
+    // actual triangle faces the ray. Its ideal reflection was below Ng.
+    Vec3 smooth=normalize(Vec3(-.57f,0,.82f)),oblique=normalize(Vec3(.7846f,0,.62f));
+    require(dot(n,2.f*dot(smooth,oblique)*smooth-oblique)<-.4f,"Bent-normal fixture must expose invalid mirror reflection");
+    Vec3 corrected=gltfReflectionNormal(smooth,n,oblique);
+    float reflectedCos=dot(n,2.f*dot(corrected,oblique)*corrected-oblique);
+    require(reflectedCos>=.009999f&&reflectedCos<.01001f,"Corrected reflection must meet geometric horizon with minimal rotation");
+    require(length(gltfReflectionNormal(n,n,oblique)-n)==0,"Valid reflective frame must remain unchanged");
+    s.normal=s.coatNormal=smooth;
+    correctGltfReflectionNormals(s,n,oblique);
+    require(length(s.normal-smooth)==0&&length(pbrSpecularNormal(s)-corrected)<1.e-6f,"Diffuse normal must remain authored independently of reflective frame");
+    s.coat=1;correctGltfReflectionNormals(s,n,oblique);
+    require(length(s.coatNormal-corrected)<1.e-6f,"Coat needs its own valid reflective frame");
 }
 
 void testImport(const std::filesystem::path& root) {
@@ -313,6 +375,12 @@ void testImport(const std::filesystem::path& root) {
     }
   }
 })json");
+    doc["materials"][3]["extensions"] = {
+        {"KHR_materials_specular", {{"specularFactor",.4},{"specularColorFactor",{2,.8,.6}},
+            {"specularTexture",{{"index",0}}},{"specularColorTexture",{{"index",0}}}}},
+        {"KHR_materials_clearcoat", {{"clearcoatFactor",.9},{"clearcoatRoughnessFactor",.2},
+            {"clearcoatTexture",{{"index",0}}},{"clearcoatRoughnessTexture",{{"index",0}}},
+            {"clearcoatNormalTexture",{{"index",0},{"scale",.7}}}}}};
     { std::ofstream file(root/"scene.gltf"); file << doc.dump(2); }
     GltfScene scene = loadGltfScene((root/"scene.gltf").c_str());
     require(scene.meshes.size()==1 && scene.instances.size()==1, "Geometry import regression");
@@ -326,6 +394,11 @@ void testImport(const std::filesystem::path& root) {
     require(defaults.glossiness==1 && defaults.specular.x==1 && defaults.albedo.x==1, "Spec-gloss defaults");
     require(scene.materials.at(3).type==MaterialType::Dielectric && near(scene.materials.at(3).ior,1.45), "Glass import regression");
     require(near(scene.materials.at(4).metallic,.8) && near(scene.materials.at(4).roughness,.3), "Core material regression");
+    const auto& pbr=scene.materials.at(4);
+    require(pbr.gltfPbrWorkflow&&!material.gltfPbrWorkflow&&!scene.materials.at(3).gltfPbrWorkflow,"Workflow routing");
+    require(near(pbr.specularWeight,.4)&&near(pbr.specularColor.x,2)&&near(pbr.clearcoat,.9)&&near(pbr.clearcoatRoughness,.2),"Specular/clearcoat factors");
+    require(pbr.specularWeightTexture.texture==0&&pbr.specularColorTexture.texture==0&&pbr.clearcoatTexture.texture==0&&pbr.clearcoatRoughnessTexture.texture==0,"Layer texture import");
+    require(pbr.clearcoatNormalTexture.texture==0&&near(pbr.clearcoatNormalScale,.7),"Independent coat normal import");
     require(scene.punctualLights.size()==3, "Only active scene lights imported");
     require(near(scene.punctualLights[0].position.y,3) && near(scene.punctualLights[0].range,10), "Parent light transform / range independent of scale");
     require(near(scene.punctualLights[1].position.x,2) && near(scene.punctualLights[1].direction.y,-1), "Nested spot position/direction");
@@ -335,7 +408,7 @@ void testImport(const std::filesystem::path& root) {
 
 int main(int argc, char** argv) {
     try {
-        testLights(); testBsdf();
+        testLights(); testBsdf(); testPbrBsdf();
         testImport(argc > 1 ? argv[1] : "/tmp/ntasad-gltf-support-fixture");
         std::cout << "glTF materials, light transforms/falloff, and BSDF estimator checks passed\n";
         return 0;

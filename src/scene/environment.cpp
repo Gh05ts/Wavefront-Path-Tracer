@@ -17,8 +17,24 @@ void buildEnvironmentDistribution(HostEnvironment& map) {
         const float4& p = map.pixels[i];
         if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z) || p.x < 0 || p.y < 0 || p.z < 0)
             throw std::runtime_error("HDR environment contains negative or non-finite radiance");
-        weights[i] = (0.2126*double(p.x)+0.7152*double(p.y)+0.0722*double(p.z)) *
-            environmentSolidAngle(i/map.width, map.width, map.height);
+    }
+    // Radiance uses normalized-coordinate bilinear reconstruction. Its tent
+    // footprint spills into adjacent texel cells; raw-texel weights leave those
+    // bright shoulders sampled only by the tiny uniform component. Integrating
+    // the 1D tent over a cell gives [1/8, 3/4, 1/8]. Use the separable cell
+    // average as the importance proxy, with the texture's wrap/clamp convention.
+    // The PDF is still a normalized piecewise-constant solid-angle density.
+    constexpr double filter[3] = {0.125, 0.75, 0.125};
+    for (uint32_t i = 0; i < count; ++i) {
+        uint32_t x = i % map.width, y = i / map.width;
+        uint32_t columns[3] = {x ? x-1 : map.width-1, x, x+1 < map.width ? x+1 : 0};
+        uint32_t rows[3] = {y ? y-1 : 0, y, y+1 < map.height ? y+1 : map.height-1};
+        double average = 0;
+        for (int row=0;row<3;++row) for (int col=0;col<3;++col) {
+            const float4& p = map.pixels[uint64_t(rows[row])*map.width+columns[col]];
+            average += filter[row]*filter[col]*(0.2126*double(p.x)+0.7152*double(p.y)+0.0722*double(p.z));
+        }
+        weights[i] = average * environmentSolidAngle(y, map.width, map.height);
         total += weights[i];
     }
     constexpr double fourPi = 12.5663706143591729538;

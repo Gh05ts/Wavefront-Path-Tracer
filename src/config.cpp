@@ -2,6 +2,7 @@
 #include "scene/scene_manifest.hpp"
 
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -45,7 +46,8 @@ static void printHelp() {
               << "                           Worker lease duration (default: 30)\n"
               << "  --push-assets            Transfer scene assets to distributed workers\n"
               << "  --asset-cache DIR        Worker asset cache directory\n"
-              << "  --rng STRATEGY           RNG strategy: xorshift32 or pcg32\n";
+              << "  --rng STRATEGY           RNG strategy: xorshift32 or pcg32\n"
+              << "  --clamp-indirect VALUE   Limit indirect sample RGB mean (default: 10; 0 disables)\n";
 }
 
 static bool parsePort(const char* value, uint16_t& port) {
@@ -133,6 +135,21 @@ bool parseScenePreset(const char* value, ScenePreset& preset) {
 
 bool parseCommandLine(int argc, char** argv, RenderConfig& render, SceneConfig& scene) {
     for (int i = 1; i < argc; ++i) {
+        if (!std::strcmp(argv[i], "--clamp-indirect")) {
+            if (i + 1 >= argc) {
+                std::cerr << "--clamp-indirect requires a finite nonnegative number\n";
+                return false;
+            }
+            char* end = nullptr;
+            const char* value = argv[++i];
+            float limit = std::strtof(value, &end);
+            if (end == value || *end != '\0' || !std::isfinite(limit) || limit < 0.0f) {
+                std::cerr << "Indirect clamp must be finite and nonnegative\n";
+                return false;
+            }
+            render.indirectRadianceClamp = limit;
+            continue;
+        }
         if (!std::strcmp(argv[i], "--list-scenes")) {
             std::cout << "Scene presets: sponza, cornell, hurricane, prism, crystal, deer, rtweek, demo\n";
             return false;

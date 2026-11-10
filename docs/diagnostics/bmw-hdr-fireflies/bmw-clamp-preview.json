@@ -1,0 +1,22 @@
+{
+  "sequence_id": "bmw_indirect_clamp_preview",
+  "scene_file": "../../../assets/scenes/bmw_hdr.json",
+  "width": 320,
+  "height": 180,
+  "tile_width": 256,
+  "tile_height": 180,
+  "max_depth": 12,
+  "russian_roulette_start_depth": 5,
+  "indirect_radiance_clamp": 10,
+  "samples": 4,
+  "reference_samples": 256,
+  "sample_start": 800000000,
+  "sample_stride": 8192,
+  "caustics": false,
+  "frames": [{
+    "position": [-11.087415727612154, 0.8, 4.8426516902981245],
+    "target": [-0.6801638148224356, -0.703269720736291, -0.9391549279183793],
+    "up": [0.10950784702956842, 0.9921223747978002, -0.06083769279420469],
+    "vertical_fov_degrees": 30
+  }]
+}

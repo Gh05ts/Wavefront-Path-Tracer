@@ -1,0 +1,18 @@
+{
+  "name": "bmw",
+  "preset": "sponza",
+  "object": {
+    "source": "gltf",
+    "file": "../gltf-research-scenes/scenes/bmw-m6/gltf/bmw_m6_extended.gltf"
+  },
+  "gltf_scale": 1,
+  "lighting": {
+    "add_sponza_top_light": false,
+    "ignore_sponza_light_occlusion": false
+  },
+  "environment": {
+    "file": "../gltf-research-scenes/scenes/common/sunflowers_environment.hdr",
+    "intensity": 1,
+    "rotation_degrees": 0
+  }
+}

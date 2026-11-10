@@ -20,6 +20,7 @@ struct RenderConfig {
     uint32_t causticPhotonCount = 1048576;
     uint32_t causticMaxDepth = 8;
     float causticGatherRadius = 0.06f;
+    float indirectRadianceClamp = 10.0f; // RGB-mean contribution limit; zero disables
     DistributedRole distributedRole = DistributedRole::Local;
     const char* listenHost = "0.0.0.0";
     uint16_t listenPort = 9000;

@@ -8,7 +8,7 @@
 namespace cg = cooperative_groups;
 
 __global__
-void generatePrimaryRays(RayQueue queue, PathState* pathStates, Camera camera, uint32_t width, uint32_t height, const uint32_t* sampleIndex, const RenderTile* tile, RngStrategy rngStrategy) {
+void generatePrimaryRays(RayQueue queue, PathState* pathStates, Camera camera, uint32_t width, uint32_t height, const uint32_t* sampleIndex, const RenderTile* tile, RngStrategy rngStrategy, float indirectRadianceClamp) {
     uint32_t localPixel = blockIdx.x * blockDim.x + threadIdx.x;
     RenderTile renderTile = *tile;
     uint32_t tilePixelCount = renderTile.width * renderTile.height;
@@ -36,6 +36,7 @@ void generatePrimaryRays(RayQueue queue, PathState* pathStates, Camera camera, u
     Ray ray = camera.generateRay(u, v);
 
     pathStates[localPixel] = PathState{ray, Vec3(1.0f, 1.0f, 1.0f), Vec3(0.0f, 0.0f, 0.0f), pixel, 0, rngState, 0xffffffffu, 1.0f, 0.0f, true, true};
+    pathStates[localPixel].indirectRadianceClamp = indirectRadianceClamp;
 
     queue.items[localPixel] = RayWorkItem{ray, localPixel};
 }
@@ -52,7 +53,7 @@ void advanceSampleIndex(uint32_t* sampleIndex, const RenderTile* tile) {
 #include "renderer/device_frame_guides.cuh"
 
 __global__
-void persistentWavefrontTrace(RayQueue initialRays, RayQueue secondaryRays, PathState* pathStates, uint32_t* queueCounts, Camera camera, uint32_t width, uint32_t height, const uint32_t* sampleIndex, const RenderTile* tile, RngStrategy rngStrategy, Scene scene, uint32_t maxDepth, uint32_t russianRouletteStartDepth, bool intersectionDebug, bool shadingNormalDebug, Vec3* framebuffer, PhotonGrid photonGrid, float photonGatherRadius) {
+void persistentWavefrontTrace(RayQueue initialRays, RayQueue secondaryRays, PathState* pathStates, uint32_t* queueCounts, Camera camera, uint32_t width, uint32_t height, const uint32_t* sampleIndex, const RenderTile* tile, RngStrategy rngStrategy, Scene scene, uint32_t maxDepth, uint32_t russianRouletteStartDepth, bool intersectionDebug, bool shadingNormalDebug, Vec3* framebuffer, PhotonGrid photonGrid, float photonGatherRadius, float indirectRadianceClamp) {
     cg::grid_group grid = cg::this_grid();
     uint32_t workerIndex = blockIdx.x * blockDim.x + threadIdx.x;
     uint32_t workerCount = gridDim.x * blockDim.x;
@@ -72,6 +73,7 @@ void persistentWavefrontTrace(RayQueue initialRays, RayQueue secondaryRays, Path
         float v = (static_cast<float>(y) + randomFloat(rngState)) / static_cast<float>(height);
         Ray ray = camera.generateRay(u, v);
         pathStates[localPixel] = PathState{ray, Vec3(1.0f, 1.0f, 1.0f), Vec3(0.0f, 0.0f, 0.0f), pixel, 0, rngState, 0xffffffffu, 1.0f, 0.0f, true, true};
+        pathStates[localPixel].indirectRadianceClamp = indirectRadianceClamp;
         initialRays.items[localPixel] = RayWorkItem{ray, localPixel};
     }
 

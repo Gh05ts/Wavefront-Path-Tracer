@@ -1,10 +1,57 @@
-# glTF specular/glossiness and punctual lights
+# glTF materials and punctual lights
 
 The loader supports `KHR_materials_pbrSpecularGlossiness` and
 `KHR_lights_punctual` for static scenes. The implementation follows the material
 parameters and light transforms/falloff in the [Khronos material extension](https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Archived/KHR_materials_pbrSpecularGlossiness)
 and [light extension](https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Khronos/KHR_lights_punctual).
 This is not a claim of complete glTF renderer conformance.
+
+## Opaque metallic/roughness, specular and clearcoat (integrator 9)
+
+Opaque imported metallic/roughness materials now use a diffuse/dielectric-GGX/
+metal-GGX mixture with continuous metallic factors. `KHR_materials_specular`
+controls dielectric F0 color and reflection strength, including its zero-strength
+grazing limit; it does not change metal reflection. Specular strength uses texture
+alpha in linear space and specular color texture RGB uses the sRGB transfer.
+`KHR_materials_ior` supplies dielectric F0. Legacy procedural/OBJ materials and
+the separate specular/glossiness workflow retain their existing models.
+
+`KHR_materials_clearcoat` adds a separate GGX layer, with factor (texture R),
+roughness (texture G), and its own normal map and scale. Without a coat normal
+map, the coat uses the original interpolated surface normal, independently of
+the base normal map. Layering uses the extension's documented NdotV Schlick
+Fresnel approximation: coat weight `c*F`, base weight `1-c*F`. This simple
+energy-limited approximation is not a full multiple-scattering layered material.
+The BRDF evaluator, continuation density and direct-light MIS all include the
+same finite lobes. Diffuse retains the HDR/cosine proposal. Zero-roughness base
+and coat reflections are exact delta lobes, excluded from solid-angle NEE/PDFs;
+visible delta/HDR connections are integrated once with their physical weights.
+Finite GGX has a numerical alpha floor of 1e-4, applied only above zero roughness.
+
+Integrator 10 additionally prevents an interpolated/normal-mapped reflective
+frame from placing its ideal reflection below the actual triangle. It rotates
+only the reflective frame towards the geometric normal as necessary; diffuse
+keeps its authored frame. Base and coat are corrected independently. The same
+corrected normals determine BRDF values, sampling and competing MIS densities.
+This follows the valid-reflection policy used by Cycles, with a small horizon
+margin. It fixes a reproduced dark inner-chrome/headlight case without changing
+roughness, radiance or mesh data; it remains an approximate smooth-normal policy.
+
+The BMW file requires clearcoat on **12 materials**, including CarPaint,
+HeadLight, WheelRim and floor. Ignoring it removed their reflection layers, even
+though all 114 meshes were imported. The layer and its specular controls are now
+loaded rather than silently discarded. See the
+[appearance audit](diagnostics/bmw-hdr-fireflies/README.md) for the supplied
+reference's camera, display, denoising and conversion differences.
+
+Support remains partial: clearcoat on emissive/transmitting materials, specular
+overrides on transmission, thin/rough/partial transmission, alpha BLEND, vertex
+colors, glTF cameras, skinning/morphing/animation, and other material extensions
+are not complete. Required unknown extensions and the partial transmission/volume
+model produce import diagnostics. Transmission without a nonzero volume thickness
+is a thin surface in glTF; the current smooth solid dielectric interpretation
+does not implement that distinction. Do not describe this as complete glTF glass
+support or qualify production references from an appearance preview alone.
 
 ## Materials
 
@@ -24,10 +71,23 @@ surface are absorbed, not resampled. A minimum perceptual roughness of 0.02
 regularizes perfectly glossy surfaces; they are finite lobes, not delta mirrors.
 The same helpers are used by standard and persistent wavefront rendering.
 
-Imported transmission materials retain the existing dielectric branch, and
-emissive materials retain their existing emission behavior. Core metallic/roughness
-and procedural/OBJ metal materials still use the legacy shading implementation;
-this change does not replace all materials with GGX. Alpha blending, vertex
+Imported transmission materials use the dielectric branch. Dielectric triangles
+retain their boundary orientation so glass exits use the correct refraction
+ratio; opaque triangles retain their two-sided facing convention. Geometric
+normals determine dielectric medium membership. Smooth normals fall back to
+the geometric interface when they would classify the wrong side or send a
+branch into the wrong hemisphere. Glass uses exact unpolarized Fresnel and
+radiance-mode eta-squared transmission, with eta-neutral roulette probabilities.
+Precision-scaled ray offsets and a smaller traversal cutoff preserve thin
+boundaries that the previous combined millimeter shift/cutoff skipped.
+Visible terminal HDR branches are integrated with Fresnel weights; geometry
+still blocks these connections, and sampled escapes are not counted twice.
+See the [BMW glass investigation](diagnostics/bmw-hdr-fireflies/README.md).
+Emissive
+materials retain their existing emission behavior. Nonzero-roughness legacy metallic
+surfaces, including procedural/OBJ metals, use the GGX helpers
+with zero diffuse color, matched PDFs and direct-light sampling. Exact
+zero-roughness metals remain delta mirrors. Alpha blending, vertex
 colors, rough refraction and complete layered emissive/reflective materials are
 not added here. Denoising albedo guides use the imported diffuse color/texture.
 
@@ -79,7 +139,7 @@ comparison reference.
 It is an appearance/loading smoke test, not convergence evidence or training data.
 No new train/validation/test assignment is made for Bistro.
 
-The renderer integrator fingerprint version is now 3 following HDR integration, so existing render
+The renderer integrator fingerprint version is now 10 following the reflective-frame correction, so existing render
 checkpoints cannot silently resume with the new shading/sampling semantics.
 This is separate from the denoiser checkpoint format. Requalify references before
 using newly rendered material/light scenes for training.

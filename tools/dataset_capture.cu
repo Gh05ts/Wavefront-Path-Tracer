@@ -140,6 +140,9 @@ int capture(const std::filesystem::path& configFile, const std::filesystem::path
     config.tileHeight = std::min(config.height, integer(root, "tile_height", 256));
     config.maxDepth = integer(root, "max_depth", 16);
     config.russianRouletteStartDepth = integer(root, "russian_roulette_start_depth", 5);
+    config.indirectRadianceClamp = root.value("indirect_radiance_clamp", config.indirectRadianceClamp);
+    if (!std::isfinite(config.indirectRadianceClamp) || config.indirectRadianceClamp < 0.0f)
+        throw std::invalid_argument("indirect_radiance_clamp must be finite and nonnegative");
     config.persistentWavefront = root.value("persistent_wavefront", false);
     config.tiledRendering = true;
     config.rngStrategy = RngStrategy::Pcg32;
@@ -263,6 +266,7 @@ int capture(const std::filesystem::path& configFile, const std::filesystem::path
                 {"caustic_radius", config.causticGatherRadius}, {"caustic_seed", 0x13579bdfu},
                 {"reference_estimator", "matched_renderer_settings"}}}};
         metadata["render"]["integrator_version"] = rendererIntegratorVersion;
+        metadata["render"]["indirect_radiance_clamp"] = config.indirectRadianceClamp;
         metadata["render"]["environment"] = {
             {"enabled", !sceneConfig.environmentFilename.empty()},
             {"intensity", sceneConfig.environmentIntensity},

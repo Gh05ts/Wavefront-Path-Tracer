@@ -1,7 +1,9 @@
 #include "config.hpp"
 #include "renderer/render_fingerprint.hpp"
+#include "distributed/job_config.hpp"
 
 #include <cstring>
+#include <cstdlib>
 #include <iostream>
 
 namespace
@@ -131,8 +133,32 @@ int main() {
     fingerprintRender.maxDepth += 1;
     valid &= check(firstFingerprint != computeRenderFingerprint(fingerprintRender, fingerprintScene), "render configuration change did not change fingerprint");
     fingerprintRender.maxDepth -= 1;
+    fingerprintRender.indirectRadianceClamp = 0;
+    valid &= check(firstFingerprint != computeRenderFingerprint(fingerprintRender, fingerprintScene),
+        "indirect clamp change did not change checkpoint fingerprint");
+    fingerprintRender.indirectRadianceClamp = 10;
     fingerprintRender.rngStrategy = RngStrategy::Pcg32;
     valid &= check(firstFingerprint != computeRenderFingerprint(fingerprintRender, fingerprintScene), "RNG strategy change did not change fingerprint");
+
+    for (const char* limit : {"0", "2.5", "-1", "nan", "inf", "1e50", "abc", "10tail", ""}) {
+        std::string value = limit;
+        char clampFlag[] = "--clamp-indirect";
+        char* clampArgs[] = {arg0, clampFlag, value.data()};
+        RenderConfig clamped;
+        bool accepted = parseCommandLine(3, clampArgs, clamped, scene);
+        bool expected = value == "0" || value == "2.5";
+        valid &= check(accepted == expected, "indirect clamp validation failed");
+        if (accepted) {
+            valid &= check(clamped.indirectRadianceClamp == std::strtof(limit, nullptr),
+                "indirect clamp option did not update configuration");
+            auto pushed = makeDistributedWorkerConfiguration(clamped, scene);
+            RenderConfig worker;
+            SceneConfig workerScene;
+            applyDistributedWorkerConfiguration(pushed, worker, workerScene);
+            valid &= check(worker.indirectRadianceClamp == clamped.indirectRadianceClamp,
+                "worker did not apply indirect clamp");
+        }
+    }
 
     const uint64_t sceneFingerprint = computeSceneFingerprint(fingerprintScene);
     fingerprintScene.name = "renamed-demo";

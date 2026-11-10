@@ -319,6 +319,16 @@ GltfScene loadGltfScene(const char* filename) {
         std::cerr << "TinyGLTF: " << error << '\n';
         std::exit(1);
     }
+    for (const auto& required : model.extensionsRequired) {
+        if (required == "KHR_materials_transmission" || required == "KHR_materials_volume") {
+            std::cerr << "glTF partial required extension " << required
+                      << ": smooth solid dielectric only; thin/rough/partial transmission is not implemented\n";
+        } else if (required != "KHR_materials_specular" && required != "KHR_materials_clearcoat" &&
+                   required != "KHR_materials_ior" && required != "KHR_materials_pbrSpecularGlossiness" &&
+                   required != "KHR_texture_transform" && required != "KHR_lights_punctual") {
+            std::cerr << "glTF unsupported required extension: " << required << '\n';
+        }
+    }
 
     GltfScene scene;
     scene.materials.resize(model.materials.size() + 1);
@@ -349,8 +359,31 @@ GltfScene loadGltfScene(const char* filename) {
         material.emissiveTexture = getTextureBinding(source.emissiveTexture, model);
         material.normalTexture = getTextureBinding(source.normalTexture, model);
         material.opacity = factor[3];
+        material.gltfPbrWorkflow = material.type == MaterialType::Diffuse;
+        material.specularWeight = getExtensionNumber(source, "KHR_materials_specular", "specularFactor", 1.0f);
+        material.specularColor = getExtensionColor(source, "KHR_materials_specular", "specularColorFactor", Vec3(1,1,1));
+        material.specularWeightTexture = getExtensionTexture(source, "KHR_materials_specular", "specularTexture", model);
+        material.specularColorTexture = getExtensionTexture(source, "KHR_materials_specular", "specularColorTexture", model);
+        material.clearcoat = getExtensionNumber(source, "KHR_materials_clearcoat", "clearcoatFactor", 0.0f);
+        material.clearcoatRoughness = getExtensionNumber(source, "KHR_materials_clearcoat", "clearcoatRoughnessFactor", 0.0f);
+        material.clearcoatTexture = getExtensionTexture(source, "KHR_materials_clearcoat", "clearcoatTexture", model);
+        material.clearcoatRoughnessTexture = getExtensionTexture(source, "KHR_materials_clearcoat", "clearcoatRoughnessTexture", model);
+        material.clearcoatNormalTexture = getExtensionTexture(source, "KHR_materials_clearcoat", "clearcoatNormalTexture", model);
+        const auto coatExtension = source.extensions.find("KHR_materials_clearcoat");
+        if (coatExtension != source.extensions.end() && coatExtension->second.Has("clearcoatNormalTexture")) {
+            const auto& normal = coatExtension->second.Get("clearcoatNormalTexture");
+            if (normal.Has("scale")) material.clearcoatNormalScale = normal.Get("scale").GetNumberAsDouble();
+        }
+        auto unitFactor = [](float x) { return std::isfinite(x) && x>=0.f && x<=1.f; };
+        auto nonnegative = [](float x) { return std::isfinite(x) && x>=0.f; };
+        if (!unitFactor(material.specularWeight) || !unitFactor(material.clearcoat) ||
+            !unitFactor(material.clearcoatRoughness) || !nonnegative(material.specularColor.x) ||
+            !nonnegative(material.specularColor.y) || !nonnegative(material.specularColor.z) ||
+            !std::isfinite(material.clearcoatNormalScale))
+            throw std::runtime_error("Invalid glTF specular/clearcoat factors");
         constexpr const char* specGloss = "KHR_materials_pbrSpecularGlossiness";
         if (source.extensions.count(specGloss)) {
+            material.gltfPbrWorkflow = false;
             material.specularGlossinessWorkflow = true;
             const auto& extension = source.extensions.at(specGloss);
             material.albedo = Vec3(1.0f, 1.0f, 1.0f);
@@ -375,6 +408,14 @@ GltfScene loadGltfScene(const char* filename) {
             if (material.type == MaterialType::Diffuse)
                 material.type = MaterialType::SpecularGlossiness;
         }
+        if (!material.gltfPbrWorkflow && material.clearcoat > 0.f)
+            std::cerr << "glTF clearcoat on non-opaque material is not implemented: " << source.name << '\n';
+        if (material.type == MaterialType::Dielectric &&
+            (material.specularWeight != 1.f || material.specularColor.x != 1.f ||
+             material.specularColor.y != 1.f || material.specularColor.z != 1.f ||
+             material.specularWeightTexture.texture != invalidTextureIndex ||
+             material.specularColorTexture.texture != invalidTextureIndex))
+            std::cerr << "glTF specular overrides on transmission are not implemented: " << source.name << '\n';
         scene.materials[i + 1] = material;
     }
     std::vector<std::vector<uint32_t>> meshAssets(model.meshes.size());

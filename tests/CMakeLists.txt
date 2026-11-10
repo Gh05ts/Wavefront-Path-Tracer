@@ -126,7 +126,7 @@ target_include_directories(distributed_worker_tests
 )
 
 target_link_libraries(distributed_worker_tests PRIVATE CUDA::cudart stdc++fs)
-add_test(NAME distributed_worker_tests COMMAND distributed_worker_tests)
+add_test(NAME distributed_worker_tests COMMAND distributed_worker_tests ${PROJECT_SOURCE_DIR}/assets/sponza/Sponza.gltf)
 
 add_executable(config_tests
     config_tests.cpp
@@ -144,6 +144,7 @@ target_include_directories(config_tests
 
 target_link_libraries(config_tests PRIVATE CUDA::cudart stdc++fs)
 add_test(NAME config_tests COMMAND config_tests)
+set_tests_properties(config_tests PROPERTIES WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 add_executable(checkpoint_tests
     checkpoint_tests.cu
@@ -208,3 +209,10 @@ if(PATHTRACER_BUILD_DATASET_CAPTURE)
     target_link_libraries(frame_export_tests PRIVATE CUDA::cudart OpenSSL::Crypto PkgConfig::OPENEXR stdc++fs)
     add_test(NAME frame_export_tests COMMAND frame_export_tests)
 endif()
+
+add_executable(material_transport_tests material_transport_tests.cu ../src/core/rng.cu)
+target_include_directories(material_transport_tests PRIVATE ../include)
+target_link_libraries(material_transport_tests PRIVATE NXB::NexusBVH CUDA::cudart)
+set_target_properties(material_transport_tests PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+add_test(NAME material_transport_tests COMMAND material_transport_tests)
+set_tests_properties(material_transport_tests PROPERTIES SKIP_RETURN_CODE 77)

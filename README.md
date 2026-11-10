@@ -65,6 +65,7 @@ relative asset path. Useful runtime switches include:
 --caustics             enable photon tracing for caustic-capable presets
 --no-caustic-gather    trace photons without camera-side gathering
 --resume               load render.checkpoint
+--clamp-indirect VALUE  indirect sample limit (default 10; 0 disables)
 ```
 
 Named presets are defined in `assets/scenes/*.json`. To render a custom scene

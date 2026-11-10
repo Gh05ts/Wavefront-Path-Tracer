@@ -54,4 +54,17 @@ struct Material {
     float opacity = 1.0f;
     TextureBinding specularGlossinessTexture;
     bool specularGlossinessWorkflow = false;
+    // Imported opaque glTF metallic/roughness, including its dielectric lobe.
+    // Legacy hand-authored diffuse/metal materials keep their original model.
+    bool gltfPbrWorkflow = false;
+    float specularWeight = 1.0f;
+    Vec3 specularColor = Vec3(1.0f, 1.0f, 1.0f);
+    TextureBinding specularWeightTexture;
+    TextureBinding specularColorTexture;
+    float clearcoat = 0.0f;
+    float clearcoatRoughness = 0.0f;
+    float clearcoatNormalScale = 1.0f;
+    TextureBinding clearcoatTexture;
+    TextureBinding clearcoatRoughnessTexture;
+    TextureBinding clearcoatNormalTexture;
 };

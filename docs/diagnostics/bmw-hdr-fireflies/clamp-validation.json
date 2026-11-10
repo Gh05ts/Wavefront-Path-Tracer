@@ -1,0 +1,890 @@
+{
+  "integrator": 11,
+  "binary_sha256": "e4c694544e3491fb0a3bdb2923b461065817759f0ed3c1f891460a164bba6a52",
+  "guides_counts_equal": true,
+  "display": "fixed exposure: Reinhard then gamma 1/2.2; raw, no denoising",
+  "caveat": "Clamp is biased; speck counts include genuine glints and are not convergence qualification.",
+  "levels": [
+    {
+      "samples": 64,
+      "clamp": 0,
+      "replica_noise_rmse": 1.0135155753008867,
+      "replicas": [
+        {
+          "spots": {
+            "whole": {
+              "strict_bright_local": 12,
+              "unstable_local": 35
+            },
+            "floor": {
+              "strict_bright_local": 4,
+              "unstable_local": 15
+            },
+            "windshield": {
+              "strict_bright_local": 2,
+              "unstable_local": 8
+            }
+          },
+          "mean_rgb": [
+            0.13297906735582235,
+            0.11925572264717832,
+            0.08792236072033774
+          ],
+          "max_rgb": 402.20416259765625,
+          "mean_change_from_raw": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "spots": {
+            "whole": {
+              "strict_bright_local": 5,
+              "unstable_local": 16
+            },
+            "floor": {
+              "strict_bright_local": 1,
+              "unstable_local": 8
+            },
+            "windshield": {
+              "strict_bright_local": 1,
+              "unstable_local": 3
+            }
+          },
+          "mean_rgb": [
+            0.12879690468607918,
+            0.11532184511587426,
+            0.08595812754705984
+          ],
+          "max_rgb": 253.05857849121094,
+          "mean_change_from_raw": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "samples": 64,
+      "clamp": 10,
+      "replica_noise_rmse": 0.299507914542283,
+      "replicas": [
+        {
+          "spots": {
+            "whole": {
+              "strict_bright_local": 4,
+              "unstable_local": 20
+            },
+            "floor": {
+              "strict_bright_local": 0,
+              "unstable_local": 8
+            },
+            "windshield": {
+              "strict_bright_local": 0,
+              "unstable_local": 3
+            }
+          },
+          "mean_rgb": [
+            0.12485442143114811,
+            0.11220221955482582,
+            0.08412735501520775
+          ],
+          "max_rgb": 140.78688049316406,
+          "mean_change_from_raw": [
+            -0.008124645924674243,
+            -0.007053503092352508,
+            -0.0037950057051299763
+          ]
+        },
+        {
+          "spots": {
+            "whole": {
+              "strict_bright_local": 3,
+              "unstable_local": 13
+            },
+            "floor": {
+              "strict_bright_local": 0,
+              "unstable_local": 5
+            },
+            "windshield": {
+              "strict_bright_local": 0,
+              "unstable_local": 3
+            }
+          },
+          "mean_rgb": [
+            0.1285384351669514,
+            0.11511701035640928,
+            0.08584172854003182
+          ],
+          "max_rgb": 253.05857849121094,
+          "mean_change_from_raw": [
+            -0.0002584695191277812,
+            -0.00020483475946497895,
+            -0.00011639900702802051
+          ]
+        }
+      ]
+    },
+    {
+      "samples": 256,
+      "clamp": 0,
+      "replica_noise_rmse": 0.3185405817465729,
+      "replicas": [
+        {
+          "spots": {
+            "whole": {
+              "strict_bright_local": 15,
+              "unstable_local": 32
+            },
+            "floor": {
+              "strict_bright_local": 6,
+              "unstable_local": 18
+            },
+            "windshield": {
+              "strict_bright_local": 3,
+              "unstable_local": 7
+            }
+          },
+          "mean_rgb": [
+            0.13032349386359732,
+            0.11671264845901634,
+            0.08664108957580285
+          ],
+          "max_rgb": 183.50233459472656,
+          "mean_change_from_raw": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "spots": {
+            "whole": {
+              "strict_bright_local": 10,
+              "unstable_local": 18
+            },
+            "floor": {
+              "strict_bright_local": 5,
+              "unstable_local": 10
+            },
+            "windshield": {
+              "strict_bright_local": 1,
+              "unstable_local": 7
+            }
+          },
+          "mean_rgb": [
+            0.12836207660286644,
+            0.11503242707100601,
+            0.08575134775026451
+          ],
+          "max_rgb": 215.7232208251953,
+          "mean_change_from_raw": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "samples": 256,
+      "clamp": 10,
+      "replica_noise_rmse": 0.0813778826920963,
+      "replicas": [
+        {
+          "spots": {
+            "whole": {
+              "strict_bright_local": 3,
+              "unstable_local": 2
+            },
+            "floor": {
+              "strict_bright_local": 0,
+              "unstable_local": 0
+            },
+            "windshield": {
+              "strict_bright_local": 0,
+              "unstable_local": 0
+            }
+          },
+          "mean_rgb": [
+            0.12607076243412293,
+            0.1131947959510449,
+            0.08468055836359124
+          ],
+          "max_rgb": 183.50233459472656,
+          "mean_change_from_raw": [
+            -0.004252731429474402,
+            -0.003517852507971434,
+            -0.0019605312122116126
+          ]
+        },
+        {
+          "spots": {
+            "whole": {
+              "strict_bright_local": 4,
+              "unstable_local": 1
+            },
+            "floor": {
+              "strict_bright_local": 0,
+              "unstable_local": 0
+            },
+            "windshield": {
+              "strict_bright_local": 0,
+              "unstable_local": 0
+            }
+          },
+          "mean_rgb": [
+            0.12707435148436338,
+            0.11400201456806346,
+            0.08516886806499441
+          ],
+          "max_rgb": 215.7232208251953,
+          "mean_change_from_raw": [
+            -0.0012877251185030522,
+            -0.001030412502942555,
+            -0.0005824796852700982
+          ]
+        }
+      ]
+    },
+    {
+      "samples": 1024,
+      "clamp": 0,
+      "replica_noise_rmse": 0.10820535607069269,
+      "replicas": [
+        {
+          "spots": {
+            "whole": {
+              "strict_bright_local": 18,
+              "unstable_local": 37
+            },
+            "floor": {
+              "strict_bright_local": 12,
+              "unstable_local": 24
+            },
+            "windshield": {
+              "strict_bright_local": 2,
+              "unstable_local": 5
+            }
+          },
+          "mean_rgb": [
+            0.12869269683615028,
+            0.1153159757818715,
+            0.0858926575571387
+          ],
+          "max_rgb": 185.5131072998047,
+          "mean_change_from_raw": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "spots": {
+            "whole": {
+              "strict_bright_local": 12,
+              "unstable_local": 28
+            },
+            "floor": {
+              "strict_bright_local": 7,
+              "unstable_local": 21
+            },
+            "windshield": {
+              "strict_bright_local": 1,
+              "unstable_local": 5
+            }
+          },
+          "mean_rgb": [
+            0.12767486642879247,
+            0.1144862052846333,
+            0.08541403783584985
+          ],
+          "max_rgb": 198.55538940429688,
+          "mean_change_from_raw": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "samples": 1024,
+      "clamp": 10,
+      "replica_noise_rmse": 0.039586362977133596,
+      "replicas": [
+        {
+          "spots": {
+            "whole": {
+              "strict_bright_local": 3,
+              "unstable_local": 0
+            },
+            "floor": {
+              "strict_bright_local": 0,
+              "unstable_local": 0
+            },
+            "windshield": {
+              "strict_bright_local": 0,
+              "unstable_local": 0
+            }
+          },
+          "mean_rgb": [
+            0.12624038546533584,
+            0.1133534784222512,
+            0.08479256315404857
+          ],
+          "max_rgb": 185.5131072998047,
+          "mean_change_from_raw": [
+            -0.002452311370814439,
+            -0.0019624973596203037,
+            -0.0011000944030901236
+          ]
+        },
+        {
+          "spots": {
+            "whole": {
+              "strict_bright_local": 3,
+              "unstable_local": 0
+            },
+            "floor": {
+              "strict_bright_local": 0,
+              "unstable_local": 0
+            },
+            "windshield": {
+              "strict_bright_local": 0,
+              "unstable_local": 0
+            }
+          },
+          "mean_rgb": [
+            0.1264800345325749,
+            0.11354872651238515,
+            0.08489237871393976
+          ],
+          "max_rgb": 198.55538940429688,
+          "mean_change_from_raw": [
+            -0.0011948318962175916,
+            -0.0009374787722481415,
+            -0.0005216591219100843
+          ]
+        }
+      ]
+    },
+    {
+      "samples": 4096,
+      "clamp": 0,
+      "replica_noise_rmse": 0.0542580912942725,
+      "replicas": [
+        {
+          "spots": {
+            "whole": {
+              "strict_bright_local": 9,
+              "unstable_local": 52
+            },
+            "floor": {
+              "strict_bright_local": 3,
+              "unstable_local": 41
+            },
+            "windshield": {
+              "strict_bright_local": 0,
+              "unstable_local": 3
+            }
+          },
+          "mean_rgb": [
+            0.12809679712053923,
+            0.11484767746984743,
+            0.08562895539664624
+          ],
+          "max_rgb": 169.34628295898438,
+          "mean_change_from_raw": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "spots": {
+            "whole": {
+              "strict_bright_local": 8,
+              "unstable_local": 37
+            },
+            "floor": {
+              "strict_bright_local": 2,
+              "unstable_local": 30
+            },
+            "windshield": {
+              "strict_bright_local": 0,
+              "unstable_local": 1
+            }
+          },
+          "mean_rgb": [
+            0.12769291157995666,
+            0.11453344755964787,
+            0.08544911812383664
+          ],
+          "max_rgb": 171.58009338378906,
+          "mean_change_from_raw": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "samples": 4096,
+      "clamp": 10,
+      "replica_noise_rmse": 0.007546003925922734,
+      "replicas": [
+        {
+          "spots": {
+            "whole": {
+              "strict_bright_local": 3,
+              "unstable_local": 0
+            },
+            "floor": {
+              "strict_bright_local": 0,
+              "unstable_local": 0
+            },
+            "windshield": {
+              "strict_bright_local": 0,
+              "unstable_local": 0
+            }
+          },
+          "mean_rgb": [
+            0.12602154460294263,
+            0.11319996450849279,
+            0.08470278555457653
+          ],
+          "max_rgb": 169.34628295898438,
+          "mean_change_from_raw": [
+            -0.0020752525175966085,
+            -0.0016477129613546519,
+            -0.0009261698420697131
+          ]
+        },
+        {
+          "spots": {
+            "whole": {
+              "strict_bright_local": 4,
+              "unstable_local": 1
+            },
+            "floor": {
+              "strict_bright_local": 0,
+              "unstable_local": 0
+            },
+            "windshield": {
+              "strict_bright_local": 0,
+              "unstable_local": 0
+            }
+          },
+          "mean_rgb": [
+            0.12607351525616903,
+            0.11324160658861425,
+            0.08472622416652686
+          ],
+          "max_rgb": 171.5800018310547,
+          "mean_change_from_raw": [
+            -0.0016193963237876436,
+            -0.0012918409710336062,
+            -0.0007228939573097806
+          ]
+        }
+      ]
+    }
+  ],
+  "checks": {
+    "integrator": 11,
+    "capture_sha256": "e4c694544e3491fb0a3bdb2923b461065817759f0ed3c1f891460a164bba6a52",
+    "ctest_passed": 18,
+    "commands": [
+      [
+        "/tmp/ntasad-capture-build/dataset_capture",
+        "/tmp/bmw-firefly-fix/standard.json",
+        "/tmp/bmw-firefly-fix/standard"
+      ],
+      [
+        "/tmp/ntasad-capture-build/dataset_capture",
+        "/tmp/bmw-firefly-fix/persistent.json",
+        "/tmp/bmw-firefly-fix/persistent"
+      ],
+      [
+        "/tmp/ntasad-capture-build/dataset_capture",
+        "/tmp/bmw-firefly-fix/preview640-clamp0.json",
+        "/tmp/bmw-firefly-fix/preview640-clamp0"
+      ],
+      [
+        "/tmp/ntasad-capture-build/dataset_capture",
+        "/tmp/bmw-firefly-fix/preview640-clamp10.json",
+        "/tmp/bmw-firefly-fix/preview640-clamp10"
+      ],
+      [
+        "/tmp/ntasad-capture-build/dataset_capture",
+        "/tmp/bmw-firefly-fix/breakfast.json",
+        "/tmp/bmw-firefly-fix/breakfast"
+      ]
+    ],
+    "modes": [
+      {
+        "albedo.B": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "albedo.G": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "albedo.R": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "depth.Z": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "geometric_normal.X": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "geometric_normal.Y": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "geometric_normal.Z": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "guide_valid.Y": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "history_valid.Y": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "motion.X": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "motion.Y": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "normal.X": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "normal.Y": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "normal.Z": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "radiance.B": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "radiance.G": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "radiance.R": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "reference.B": {
+          "max_abs": 0.0027390122413635254,
+          "rms": 4.5562284794092635e-05
+        },
+        "reference.G": {
+          "max_abs": 0.004305444657802582,
+          "rms": 6.991771148920773e-05
+        },
+        "reference.R": {
+          "max_abs": 0.005565270781517029,
+          "rms": 8.640745740709697e-05
+        },
+        "reference_count.N": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "sample_count.N": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        }
+      },
+      {
+        "albedo.B": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "albedo.G": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "albedo.R": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "depth.Z": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "geometric_normal.X": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "geometric_normal.Y": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "geometric_normal.Z": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "guide_valid.Y": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "history_valid.Y": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "motion.X": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "motion.Y": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "normal.X": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "normal.Y": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "normal.Z": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "radiance.B": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "radiance.G": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "radiance.R": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "reference.B": {
+          "max_abs": 0.00487181544303894,
+          "rms": 4.135075204985078e-05
+        },
+        "reference.G": {
+          "max_abs": 0.005565013736486435,
+          "rms": 4.80770580797452e-05
+        },
+        "reference.R": {
+          "max_abs": 0.005502372980117798,
+          "rms": 4.879783817863085e-05
+        },
+        "reference_count.N": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        },
+        "sample_count.N": {
+          "max_abs": 0.0,
+          "rms": 0.0
+        }
+      }
+    ],
+    "raw_v10_v11": {
+      "albedo.B": {
+        "identical": true,
+        "max_abs": 0.0,
+        "rms": 0.0
+      },
+      "albedo.G": {
+        "identical": true,
+        "max_abs": 0.0,
+        "rms": 0.0
+      },
+      "albedo.R": {
+        "identical": true,
+        "max_abs": 0.0,
+        "rms": 0.0
+      },
+      "depth.Z": {
+        "identical": true,
+        "max_abs": 0.0,
+        "rms": 0.0
+      },
+      "geometric_normal.X": {
+        "identical": true,
+        "max_abs": 0.0,
+        "rms": 0.0
+      },
+      "geometric_normal.Y": {
+        "identical": true,
+        "max_abs": 0.0,
+        "rms": 0.0
+      },
+      "geometric_normal.Z": {
+        "identical": true,
+        "max_abs": 0.0,
+        "rms": 0.0
+      },
+      "guide_valid.Y": {
+        "identical": true,
+        "max_abs": 0.0,
+        "rms": 0.0
+      },
+      "history_valid.Y": {
+        "identical": true,
+        "max_abs": 0.0,
+        "rms": 0.0
+      },
+      "motion.X": {
+        "identical": true,
+        "max_abs": 0.0,
+        "rms": 0.0
+      },
+      "motion.Y": {
+        "identical": true,
+        "max_abs": 0.0,
+        "rms": 0.0
+      },
+      "normal.X": {
+        "identical": true,
+        "max_abs": 0.0,
+        "rms": 0.0
+      },
+      "normal.Y": {
+        "identical": true,
+        "max_abs": 0.0,
+        "rms": 0.0
+      },
+      "normal.Z": {
+        "identical": true,
+        "max_abs": 0.0,
+        "rms": 0.0
+      },
+      "radiance.B": {
+        "identical": false,
+        "max_abs": 2.384185791015625e-07,
+        "rms": 5.709584960524171e-09
+      },
+      "radiance.G": {
+        "identical": false,
+        "max_abs": 4.76837158203125e-07,
+        "rms": 7.606303895679988e-09
+      },
+      "radiance.R": {
+        "identical": false,
+        "max_abs": 4.76837158203125e-07,
+        "rms": 8.306752476290532e-09
+      },
+      "reference.B": {
+        "identical": false,
+        "max_abs": 0.0006576776504516602,
+        "rms": 7.018329757330654e-06
+      },
+      "reference.G": {
+        "identical": false,
+        "max_abs": 0.0011793076992034912,
+        "rms": 1.060680705020366e-05
+      },
+      "reference.R": {
+        "identical": false,
+        "max_abs": 0.0014798939228057861,
+        "rms": 1.2974778544451853e-05
+      },
+      "reference_count.N": {
+        "identical": true,
+        "max_abs": 0.0,
+        "rms": 0.0
+      },
+      "sample_count.N": {
+        "identical": true,
+        "max_abs": 0.0,
+        "rms": 0.0
+      }
+    }
+  },
+  "hardware": "NVIDIA GeForce RTX 3090, driver 610.57.04; existing build architecture 75 (driver JIT on 86)",
+  "base_config": {
+    "sequence_id": "bmw_indirect_clamp_preview",
+    "scene_file": "../../../assets/scenes/bmw_hdr.json",
+    "width": 320,
+    "height": 180,
+    "tile_width": 256,
+    "tile_height": 180,
+    "max_depth": 12,
+    "russian_roulette_start_depth": 5,
+    "indirect_radiance_clamp": 10,
+    "samples": 4,
+    "reference_samples": 256,
+    "sample_start": 800000000,
+    "sample_stride": 8192,
+    "caustics": false,
+    "frames": [
+      {
+        "position": [
+          -11.087415727612154,
+          0.8,
+          4.8426516902981245
+        ],
+        "target": [
+          -0.6801638148224356,
+          -0.703269720736291,
+          -0.9391549279183793
+        ],
+        "up": [
+          0.10950784702956842,
+          0.9921223747978002,
+          -0.06083769279420469
+        ],
+        "vertical_fov_degrees": 30
+      }
+    ]
+  },
+  "source_sha256": {
+    "include/config.hpp": "e920ad055ccc6f7e0a2a1b62c5ef3ed1366c4a28e3381f95aa347a79d711d204",
+    "include/renderer/path_state.cuh": "d9c26f17dd7e7438b34d7334a5cd7958967c8f95d185f02c848bee07166038db",
+    "include/renderer/device_traversal.cuh": "14c1f5e97ebf89382c69c1187c424317ee7b73477e73b44c5c8a1310011faf79",
+    "include/renderer/device_path_shading.cuh": "37227e1a3f162a6a6a0b19a026678600736b2c7a99e2607d811d2f8bc6414b09",
+    "include/renderer/renderer.cuh": "406d018d055da7ceff991a29baae77e543392011e865cef152a03294df3e72cb",
+    "include/renderer/render_fingerprint.hpp": "1e319ae348904211c8e0e677a8a33ef02c4ff73bc0dcf71dcff12e4fff2923bb",
+    "src/renderer/renderer.cu": "35367e6339efdb29fdd9a84f927aa1c3f2c53a975f8d63d7dadada6852b2edf8",
+    "src/renderer/render_driver.cu": "e8a19eef74dbb9921df945b7e8fde92d6c6dd7c53c4999c1a0c24255b30d528b",
+    "tools/dataset_capture.cu": "ca502b3433f84b858b689759174db4e435e93e27aae6078d5d797f6fe1823b07"
+  },
+  "remaining_4096_outlier": {
+    "replica": 1,
+    "pixel": [
+      188,
+      85
+    ],
+    "location": "headlight",
+    "clamped_rgb": [
+      2.084439277648926,
+      1.6794800758361816,
+      0.9987605214118958
+    ],
+    "raw_rgb": [
+      2.0880441665649414,
+      1.6822187900543213,
+      1.0003583431243896
+    ],
+    "caveat": "A threshold outlier remains. Direct highlights are not clamped; no universal absence of specks is claimed."
+  }
+}

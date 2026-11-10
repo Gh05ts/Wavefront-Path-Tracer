@@ -56,24 +56,20 @@ void tracePhotons(PhotonQueue photons, Scene scene, uint32_t photonCount, uint32
         if (material.type == MaterialType::Metal) {
             direction = normalize(reflect(normalize(ray.direction), normal));
         } else if (material.type == MaterialType::Dielectric) {
-            bool frontFace = dot(ray.direction, normal) < 0.0f;
-            Vec3 interfaceNormal = frontFace ? normal : -normal;
             float ior = material.ior;
             if (material.dispersion > 0.0f && photon.spectralChannel < 3) {
                 float channelOffset = static_cast<float>(photon.spectralChannel) - 1.0f;
                 ior += channelOffset * material.dispersion;
             }
-            float refractionRatio = frontFace ? 1.0f / ior : ior;
-            float cosTheta = fminf(dot(-ray.direction, interfaceNormal), 1.0f);
-            float sinTheta = sqrtf(fmaxf(0.0f, 1.0f - cosTheta * cosTheta));
-            bool reflected = refractionRatio * sinTheta > 1.0f || schlickReflectance(cosTheta, refractionRatio) > randomFloat(photon.rngState);
-            direction = reflected ? reflect(ray.direction, interfaceNormal) : refract(ray.direction, interfaceNormal, refractionRatio);
+            auto boundary = dielectricInterface(normalize(ray.direction), hit.geometricNormal, hit.normal, ior);
+            bool reflected = boundary.reflectance >= 1.0f || boundary.reflectance > randomFloat(photon.rngState);
+            direction = reflected ? boundary.reflection : boundary.transmission;
         } else {
             direction = sampleCosineHemisphere(normal, photon.rngState);
         }
         if (material.type == MaterialType::Metal || material.type == MaterialType::Dielectric) ++photon.specularBounces;
         photon.flux = hadamard(photon.flux, material.albedo);
-        ray = Ray(hit.position + (dot(direction, hit.geometricNormal) >= 0.0f ? 1.0f : -1.0f) * hit.geometricNormal * 0.001f, direction);
+        ray = Ray(offsetRayOrigin(hit.position, hit.geometricNormal, direction, hit.t), direction);
     }
 }
 

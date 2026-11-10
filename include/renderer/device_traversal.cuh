@@ -1,5 +1,6 @@
 #pragma once
 #include "specular_glossiness.cuh"
+#include "gltf_pbr.cuh"
 
 // Header-backed device traversal and material lookup implementation. It is
 // included by renderer.cu to preserve the existing kernel compilation unit.
@@ -35,7 +36,7 @@ bool intersectSphere(const Ray& ray, const Sphere& sphere, float& t) {
     float t0 = (-b - sqrtD) / (2.0f * a);
     float t1 = (-b + sqrtD) / (2.0f * a);
 
-    constexpr float tMin = 0.001f;
+    constexpr float tMin = rayMinDistance;
 
     if (t0 > tMin) {
         t = t0;
@@ -53,7 +54,7 @@ bool intersectSphere(const Ray& ray, const Sphere& sphere, float& t) {
 __device__
 bool intersectTriangle(const Ray& ray, const Triangle& triangle, float& t, float& u, float& v) {
     constexpr float epsilon = 1e-8f;
-    constexpr float tMin = 0.001f;
+    constexpr float tMin = rayMinDistance;
 
     Vec3 edge1 = triangle.v1 - triangle.v0;
     Vec3 edge2 = triangle.v2 - triangle.v0;
@@ -90,7 +91,7 @@ bool intersectTriangle(const Ray& ray, const Triangle& triangle, float& t) {
 }
 
 __device__
-Vec3 getTriangleNormal(const Triangle& triangle, const Ray& ray, float u, float v) {
+Vec3 getTriangleNormal(const Triangle& triangle, const Ray& ray, float u, float v, bool faceForward = true) {
     Vec3 normal;
 
     if (triangle.hasVertexNormals)
@@ -98,13 +99,15 @@ Vec3 getTriangleNormal(const Triangle& triangle, const Ray& ray, float u, float 
     else
         normal = normalize(cross(triangle.v1 - triangle.v0, triangle.v2 - triangle.v0));
 
-    return dot(normal, ray.direction) > 0.0f ? -normal : normal;
+    // Dielectrics retain their boundary orientation to distinguish entry/exit.
+    return faceForward && dot(normal, ray.direction) > 0.0f ? -normal : normal;
 }
 
 __device__
-Vec3 getTriangleGeometricNormal(const Triangle& triangle, const Ray& ray) {
+Vec3 getTriangleGeometricNormal(const Triangle& triangle, const Ray& ray, bool faceForward = true) {
     Vec3 normal = normalize(cross(triangle.v1 - triangle.v0, triangle.v2 - triangle.v0));
-    return dot(normal, ray.direction) > 0.0f ? -normal : normal;
+    // Dielectrics retain their boundary orientation to distinguish entry/exit.
+    return faceForward && dot(normal, ray.direction) > 0.0f ? -normal : normal;
 }
 
 __device__
@@ -142,8 +145,8 @@ bool intersectTriangleHit(const Ray& ray, const Triangle& triangle, Scene scene,
 
     closestT = t;
     closestMaterial = static_cast<int>(materialIndex);
-    closestGeometricNormal = getTriangleGeometricNormal(triangle, ray);
-    closestNormal = getTriangleNormal(triangle, ray, u, v);
+    closestGeometricNormal = getTriangleGeometricNormal(triangle, ray, scene.materials[materialIndex].type != MaterialType::Dielectric);
+    closestNormal = getTriangleNormal(triangle, ray, u, v, scene.materials[materialIndex].type != MaterialType::Dielectric);
     closestUv = uv;
     closestUv1 = uv1;
     if (triangle.hasVertexTangents) {
@@ -182,7 +185,7 @@ bool intersectAabb(const Ray& ray, const Vec3& inverseDirection, float minimumX,
     float tmax = fminf(fmaxf(tx0, tx1), fminf(fmaxf(ty0, ty1), fmaxf(tz0, tz1)));
     nearT = tmin;
 
-    return tmax >= fmaxf(tmin, 0.001f) && tmin < closestT;
+    return tmax >= fmaxf(tmin, rayMinDistance) && tmin < closestT;
 }
 
 __device__
@@ -257,8 +260,8 @@ void intersectNexusBvh2(const Ray& ray, const Triangle* triangles, const NXB::BV
 
                 closestT = t;
                 closestMaterial = static_cast<int>(materialIndex);
-                closestGeometricNormal = getTriangleGeometricNormal(triangle, ray);
-                closestNormal = getTriangleNormal(triangle, ray, u, v);
+                closestGeometricNormal = getTriangleGeometricNormal(triangle, ray, scene.materials[materialIndex].type != MaterialType::Dielectric);
+                closestNormal = getTriangleNormal(triangle, ray, u, v, scene.materials[materialIndex].type != MaterialType::Dielectric);
                 closestUv = uv;
                 closestUv1 = uv1;
                 if (triangle.hasVertexTangents) {
@@ -390,11 +393,43 @@ __device__ SpecularGlossinessSurface getSpecGlossSurface(const Material& materia
         hadamard(material.specular, gltfSrgbToLinear(texel)), getMaterialRoughness(material, hit, scene)};
 }
 
+__device__ float diffuseEnvironmentProbability(Scene scene) {
+    const auto& map = scene.environment;
+    return map.texture && map.intensity > 0.0f && map.width && map.height &&
+        map.probabilities && map.alias ? 0.5f : 0.0f;
+}
+
+// A continuation is an actual traced path, so an environment proposal can
+// discover sun connections through specular geometry that blocks ordinary NEE.
+// Keep a cosine component for full diffuse support and account for the complete
+// mixture both in throughput and in the competing direct-light MIS estimator.
+__device__ float diffuseContinuationPdf(Scene scene, const Vec3& normal, const Vec3& direction) {
+    float probability = diffuseEnvironmentProbability(scene);
+    float cosinePdf = fmaxf(0.0f, dot(normal, direction)) * 0.31830988618f;
+    return probability > 0.0f ? (1.0f - probability) * cosinePdf +
+        probability * environmentPdf(scene.environment, direction) : cosinePdf;
+}
+
+__device__ EnvironmentSample samplePathEnvironment(Scene scene, RngState& rng) {
+    float coarse = randomFloat(rng), fine = randomFloat(rng);
+    double candidate = double(coarse) + double(fine) * (1.0 / 16777216.0);
+    float coin = randomFloat(rng), u = randomFloat(rng), v = randomFloat(rng);
+    return sampleEnvironment(scene.environment, candidate, coin, u, v);
+}
+
 __device__ Vec3 evaluateSurface(const Material& material, const Hit& hit, Scene scene,
     const Vec3& outgoing, const Vec3& incoming, float& pdf) {
     if (material.type == MaterialType::SpecularGlossiness)
         return evaluateSpecGloss(getSpecGlossSurface(material, hit, scene), hit.normal, outgoing, incoming, pdf);
-    pdf = fmaxf(0.0f, dot(hit.normal, incoming)) * 0.31830988618f;
+    MaterialType effective = material.type == MaterialType::Diffuse &&
+        getMaterialMetallic(material, hit, scene) > 0.5f ? MaterialType::Metal : material.type;
+    if (effective == MaterialType::Metal) {
+        if (getMaterialRoughness(material, hit, scene) <= 0.0f) { pdf = 0.0f; return Vec3(); }
+        SpecularGlossinessSurface surface{Vec3(), getMaterialAlbedo(material, hit, scene),
+            getMaterialRoughness(material, hit, scene)};
+        return evaluateSpecGloss(surface, hit.normal, outgoing, incoming, pdf);
+    }
+    pdf = diffuseContinuationPdf(scene, hit.normal, incoming);
     return getMaterialAlbedo(material, hit, scene) * 0.31830988618f;
 }
 
@@ -457,6 +492,33 @@ Vec3 getMaterialNormal(const Material& material, const Hit& hit, Scene scene) {
     return normalize(normal);
 }
 
+__device__ GltfPbrSurface getGltfPbrSurface(const Material& material, const Hit& hit,
+    const Hit& shadedHit, Scene scene) {
+    float weight=material.specularWeight*sampleTexture(material.specularWeightTexture,hit,scene,make_float4(1,1,1,1)).w;
+    Vec3 color=hadamard(material.specularColor,gltfSrgbToLinear(sampleTexture(material.specularColorTexture,hit,scene,make_float4(1,1,1,1))));
+    float f0=(material.ior-1.f)/(material.ior+1.f); f0*=f0;
+    Vec3 dielectricF0(fminf(1.f,f0*color.x)*weight,fminf(1.f,f0*color.y)*weight,fminf(1.f,f0*color.z)*weight);
+    Material coatMaterial=material;
+    coatMaterial.normalTexture=material.clearcoatNormalTexture;
+    coatMaterial.normalScale=material.clearcoatNormalScale;
+    Vec3 coatNormal=getMaterialNormal(coatMaterial,hit,scene);
+    if (dot(coatNormal,hit.geometricNormal)<0) coatNormal=-coatNormal;
+    return {getMaterialAlbedo(material,hit,scene),shadedHit.normal,coatNormal,
+        getMaterialMetallic(material,hit,scene),getMaterialRoughness(material,hit,scene),dielectricF0,weight,
+        material.clearcoat*sampleTexture(material.clearcoatTexture,hit,scene,make_float4(1,1,1,1)).x,
+        material.clearcoatRoughness*sampleTexture(material.clearcoatRoughnessTexture,hit,scene,make_float4(1,1,1,1)).y};
+}
+
+__device__ Vec3 evaluateSurfaceCos(const Material& material, const Hit& hit, const Hit& shadedHit,
+    Scene scene, Vec3 view, Vec3 light, float& pdf) {
+    if (material.gltfPbrWorkflow) {
+        auto surface=getGltfPbrSurface(material,hit,shadedHit,scene);
+        correctGltfReflectionNormals(surface,hit.geometricNormal,view);
+        return evaluateGltfPbrCos(surface,view,light,diffuseContinuationPdf(scene,surface.normal,light),pdf);
+    }
+    return evaluateSurface(material,shadedHit,scene,view,light,pdf)*fmaxf(0.f,dot(shadedHit.normal,light));
+}
+
 __device__
 void sampleDirectLight(PathState& path, const Hit& hit, const Hit& shadedHit, const Material& material, Scene scene) {
     if (scene.lightCount == 0)
@@ -476,22 +538,27 @@ void sampleDirectLight(PathState& path, const Hit& hit, const Hit& shadedHit, co
     float shadingCosine = fmaxf(0.0f, dot(shadedHit.normal, direction));
     float lightCosine = fmaxf(0.0f, dot(light.normal, -direction));
 
-    if (geometricCosine == 0.0f || shadingCosine == 0.0f || lightCosine == 0.0f)
+    if (geometricCosine == 0.0f || (!material.gltfPbrWorkflow && shadingCosine == 0.0f) || lightCosine == 0.0f)
         return;
 
-    Ray shadowRay(hit.position + hit.geometricNormal * 0.001f, direction);
+    Vec3 shadowOrigin = offsetRayOrigin(hit.position, hit.geometricNormal, direction, hit.t);
+    Vec3 shadowTarget = offsetRayOrigin(lightPosition, light.normal, -direction, distance);
+    Vec3 shadowSegment = shadowTarget - shadowOrigin;
+    float shadowDistance = length(shadowSegment);
+    if (!(shadowDistance > rayMinDistance)) return;
+    Ray shadowRay(shadowOrigin, shadowSegment / shadowDistance);
 
-    if (!scene.ignoreDirectLightOcclusion && isOccluded(shadowRay, distance - 0.002f, scene))
+    if (!scene.ignoreDirectLightOcclusion && isOccluded(shadowRay, shadowDistance - rayMinDistance, scene))
         return;
 
     const Material& lightMaterial = scene.materials[light.material];
-    float geometryTerm = shadingCosine * lightCosine * light.area / (distanceSquared * light.selectionPdf);
+    float geometryTerm = lightCosine * light.area / (distanceSquared * light.selectionPdf);
     float lightPdf = light.selectionPdf * distanceSquared / (lightCosine * light.area);
     float bsdfPdf;
-    Vec3 bsdf = evaluateSurface(material, shadedHit, scene, -path.ray.direction, direction, bsdfPdf);
+    Vec3 bsdf = evaluateSurfaceCos(material, hit, shadedHit, scene, -path.ray.direction, direction, bsdfPdf);
     float misWeight = powerHeuristic(lightPdf, bsdfPdf);
     Vec3 directLighting = hadamard(bsdf, lightMaterial.emission) * (geometryTerm * misWeight);
-    path.radiance += hadamard(path.throughput, directLighting);
+    addPathRadiance(path, hadamard(path.throughput, directLighting));
 }
 
 __device__ Vec3 environmentRadiance(const EnvironmentView& map, const Vec3& direction) {
@@ -504,47 +571,98 @@ __device__ void addEnvironmentOrSky(PathState& path, Scene scene) {
     if (scene.environment.texture) {
         float weight = path.depth > 0 && !path.specularBounce ?
             powerHeuristic(path.previousBsdfPdf, environmentPdf(scene.environment, path.ray.direction)) : 1.0f;
-        path.radiance += hadamard(path.throughput, environmentRadiance(scene.environment, path.ray.direction)) * weight;
+        addPathRadiance(path, hadamard(path.throughput, environmentRadiance(scene.environment, path.ray.direction)) * weight, true);
     } else if (!scene.blackBackground) {
         float t = 0.5f * (path.ray.direction.y + 1.0f);
         Vec3 sky = (1.0f-t)*Vec3(1.0f,1.0f,1.0f) + t*Vec3(0.5f,0.7f,1.0f);
-        path.radiance += hadamard(path.throughput, sky);
+        addPathRadiance(path, hadamard(path.throughput, sky), true);
     }
+}
+
+__device__ Vec3 continueDielectricSurface(PathState& path, const Hit& hit,
+    const Hit& shadedHit, const Material& material, Scene scene, uint32_t maxDepth) {
+    path.throughput = hadamard(path.throughput, getMaterialAlbedo(material, shadedHit, scene));
+    auto boundary = dielectricInterface(normalize(path.ray.direction), hit.geometricNormal,
+        shadedHit.normal, material.ior);
+    float etaSquared = boundary.eta * boundary.eta;
+    bool reflectionEscapes = false, transmissionEscapes = false;
+    // Integrate terminal HDR branches instead of assigning the full sun value
+    // to a rare Fresnel coin flip. Other geometry (including more glass) still
+    // occludes each connection. Respect the existing bounce cap and do not add
+    // the same terminal branch again when the sampled continuation escapes.
+    if (scene.environment.texture && path.depth + 1 < maxDepth) {
+        if (boundary.reflectance > 0.0f) {
+            Vec3 direction = boundary.reflection;
+            Ray ray(offsetRayOrigin(hit.position, hit.geometricNormal, direction, hit.t), direction);
+            reflectionEscapes = !isOccluded(ray, 1.0e30f, scene);
+            if (reflectionEscapes)
+                addPathRadiance(path, hadamard(path.throughput, environmentRadiance(scene.environment, direction)) * boundary.reflectance);
+        }
+        if (boundary.reflectance < 1.0f) {
+            Vec3 direction = boundary.transmission;
+            Ray ray(offsetRayOrigin(hit.position, hit.geometricNormal, direction, hit.t), direction);
+            transmissionEscapes = !isOccluded(ray, 1.0e30f, scene);
+            if (transmissionEscapes)
+                addPathRadiance(path, hadamard(path.throughput, environmentRadiance(scene.environment, direction)) *
+                    ((1.0f - boundary.reflectance) * etaSquared));
+        }
+    }
+    bool reflected = boundary.reflectance >= 1.0f || boundary.reflectance > randomFloat(path.rngState);
+    if (!reflected) {
+        // Camera paths transport radiance; paired air/glass boundaries cancel
+        // this factor. Its inverse keeps the roulette heuristic eta-neutral.
+        path.throughput *= etaSquared;
+        path.etaScale /= etaSquared;
+        if (boundary.frontFace) {
+            path.mediumMaterial = hit.material;
+            path.mediumDensity = material.volumeDensity * getMaterialThickness(material, hit, scene);
+        } else {
+            path.mediumMaterial = 0xffffffffu;
+            path.mediumDensity = 1.0f;
+        }
+    }
+    if (reflected ? reflectionEscapes : transmissionEscapes) path.active = false;
+    path.specularBounce = true;
+    path.previousBsdfPdf = 0.0f;
+    return reflected ? boundary.reflection : boundary.transmission;
 }
 
 __device__ void sampleDirectEnvironment(PathState& path, const Hit& hit, const Hit& shadedHit,
     const Material& material, Scene scene) {
     const EnvironmentView& map = scene.environment;
     if (!map.texture || map.intensity == 0.0f) return;
-    float coarse = randomFloat(path.rngState), fine = randomFloat(path.rngState);
-    double candidate = double(coarse) + double(fine)*(1.0/16777216.0);
-    float coin = randomFloat(path.rngState);
-    float u = randomFloat(path.rngState), v = randomFloat(path.rngState);
-    EnvironmentSample light = sampleEnvironment(map, candidate, coin, u, v);
+    EnvironmentSample light = samplePathEnvironment(scene, path.rngState);
     float cosine = dot(shadedHit.normal, light.direction);
-    if (cosine <= 0.0f || dot(hit.geometricNormal, light.direction) <= 0.0f || !(light.pdf > 0.0f)) return;
-    Ray shadow(hit.position + hit.geometricNormal * 0.001f, light.direction);
+    if ((!material.gltfPbrWorkflow && cosine <= 0.0f) || dot(hit.geometricNormal, light.direction) <= 0.0f || !(light.pdf > 0.0f)) return;
+    Ray shadow(offsetRayOrigin(hit.position, hit.geometricNormal, light.direction, hit.t), light.direction);
     if (!scene.ignoreDirectLightOcclusion && isOccluded(shadow, 1.0e30f, scene)) return;
     float bsdfPdf;
-    Vec3 bsdf = evaluateSurface(material, shadedHit, scene, -path.ray.direction, light.direction, bsdfPdf);
+    Vec3 bsdf = evaluateSurfaceCos(material, hit, shadedHit, scene, -path.ray.direction, light.direction, bsdfPdf);
     float weight = powerHeuristic(light.pdf, bsdfPdf);
-    Vec3 direct = hadamard(bsdf, environmentRadiance(map, light.direction)) * (cosine * weight / light.pdf);
-    path.radiance += hadamard(path.throughput, direct);
+    Vec3 direct = hadamard(bsdf, environmentRadiance(map, light.direction)) * (weight / light.pdf);
+    addPathRadiance(path, hadamard(path.throughput, direct));
 }
 
 __device__ void addPunctualLight(PathState& path, const Hit& hit, const Hit& shadedHit,
     const Material& material, Scene scene, const PunctualLight& source, float inverseSelectionPdf) {
     PunctualLightSample light = samplePunctualLight(source, hit.position);
     float cosine = dot(shadedHit.normal, light.direction);
-    if (cosine <= 0.0f || dot(hit.geometricNormal, light.direction) <= 0.0f ||
+    if ((!material.gltfPbrWorkflow && cosine <= 0.0f) || dot(hit.geometricNormal, light.direction) <= 0.0f ||
         lengthSquared(light.incident) == 0.0f) return;
-    Ray shadow(hit.position + hit.geometricNormal * 0.001f, light.direction);
-    if (!scene.ignoreDirectLightOcclusion && isOccluded(shadow, light.distance - 0.002f, scene)) return;
+    Ray shadow(offsetRayOrigin(hit.position, hit.geometricNormal, light.direction, hit.t), light.direction);
+    float shadowDistance = light.distance;
+    if (source.type != PunctualLightType::Directional) {
+        Vec3 segment = source.position - shadow.origin;
+        shadowDistance = length(segment);
+        if (!(shadowDistance > rayMinDistance)) return;
+        shadow.direction = segment / shadowDistance;
+    }
+    if (!scene.ignoreDirectLightOcclusion && isOccluded(shadow, shadowDistance - rayMinDistance, scene)) return;
     float ignoredPdf;
-    Vec3 bsdf = evaluateSurface(material, shadedHit, scene, -path.ray.direction, light.direction, ignoredPdf);
+    Vec3 bsdf = evaluateSurfaceCos(material, hit, shadedHit, scene, -path.ray.direction, light.direction, ignoredPdf);
     // Delta lights cannot be reached by BSDF direction sampling: no MIS weight.
-    Vec3 direct = hadamard(bsdf, light.incident) * (cosine * inverseSelectionPdf);
-    path.radiance += hadamard(path.throughput, direct);
+    Vec3 direct = hadamard(bsdf, light.incident) * inverseSelectionPdf;
+    addPathRadiance(path, hadamard(path.throughput, direct));
 }
 
 __device__ void sampleDirectPunctualLight(PathState& path, const Hit& hit, const Hit& shadedHit,
@@ -557,9 +675,33 @@ __device__ void sampleDirectPunctualLight(PathState& path, const Hit& hit, const
     addPunctualLight(path, hit, shadedHit, material, scene, scene.punctualLights[index], static_cast<float>(count));
 }
 
-__device__ Vec3 continueSpecGloss(PathState& path, const Hit& hit, const Hit& shadedHit,
+__device__ Vec3 continueDiffuseSurface(PathState& path, const Hit& hit, const Hit& shadedHit,
     const Material& material, Scene scene) {
-    SpecularGlossinessSurface surface = getSpecGlossSurface(material, shadedHit, scene);
+    float probability = diffuseEnvironmentProbability(scene);
+    Vec3 direction = probability > 0.0f && randomFloat(path.rngState) < probability ?
+        samplePathEnvironment(scene, path.rngState).direction :
+        sampleCosineHemisphere(shadedHit.normal, path.rngState);
+    float cosine = dot(shadedHit.normal, direction);
+    float pdf = diffuseContinuationPdf(scene, shadedHit.normal, direction);
+    if (!(pdf > 0.0f) || cosine <= 0.0f || dot(direction, hit.geometricNormal) <= 0.0f) {
+        path.active = false;
+        return direction;
+    }
+    // Reject below-geometry samples. Resampling them about another normal and
+    // reporting only its cosine density does not match the sampled distribution.
+    path.throughput = hadamard(path.throughput, getMaterialAlbedo(material, shadedHit, scene)) *
+        (cosine * 0.31830988618f / pdf);
+    path.previousBsdfPdf = pdf;
+    path.specularBounce = false;
+    return direction;
+}
+
+__device__ Vec3 continueGlossySurface(PathState& path, const Hit& hit, const Hit& shadedHit,
+    const Material& material, Scene scene) {
+    SpecularGlossinessSurface surface = material.type == MaterialType::SpecularGlossiness ?
+        getSpecGlossSurface(material, shadedHit, scene) :
+        SpecularGlossinessSurface{Vec3(), getMaterialAlbedo(material, shadedHit, scene),
+            getMaterialRoughness(material, shadedHit, scene)};
     Vec3 outgoing = -path.ray.direction;
     float choice = randomFloat(path.rngState), u = randomFloat(path.rngState), v = randomFloat(path.rngState);
     Vec3 direction = sampleSpecGloss(surface, shadedHit.normal, outgoing, choice, u, v);
@@ -572,6 +714,68 @@ __device__ Vec3 continueSpecGloss(PathState& path, const Hit& hit, const Hit& sh
     path.throughput = hadamard(path.throughput, bsdf) * (fmaxf(0.0f, dot(shadedHit.normal, direction)) / pdf);
     path.previousBsdfPdf = pdf;
     path.specularBounce = false; // finite GGX, participates in area-light MIS
+    return direction;
+}
+
+__device__ Vec3 continueGltfPbrSurface(PathState& path, const Hit& hit, const Hit& shadedHit,
+    const Material& material, Scene scene, uint32_t maxDepth) {
+    auto surface=getGltfPbrSurface(material,hit,shadedHit,scene);
+    Vec3 view=-path.ray.direction;
+    correctGltfReflectionNormals(surface,hit.geometricNormal,view);
+    auto weights=pbrWeights(surface,view);
+    float choice=randomFloat(path.rngState);
+    bool coat=choice<weights.coat;
+    bool specular=!coat && choice<weights.coat+weights.specular;
+    bool delta=(coat && surface.coatRoughness<=0) || (specular && surface.roughness<=0);
+    bool baseEscapes=false,coatEscapes=false;
+    Vec3 baseCoefficient=pbrBaseFresnel(surface,dot(pbrSpecularNormal(surface),view))*(1.f-weights.coat);
+    // Integrate visible delta/HDR connections exactly, as for smooth glass.
+    // Opaque geometry still blocks each connection; no transparent shadow hack.
+    if (scene.environment.texture && path.depth+1<maxDepth) {
+        for (int lobe=0;lobe<2;++lobe) {
+            bool isCoat=lobe==1;
+            float mass=isCoat?weights.coat:weights.specular;
+            float roughness=isCoat?surface.coatRoughness:surface.roughness;
+            if (!(mass>0) || roughness>0) continue;
+            Vec3 normal=isCoat?surface.coatNormal:pbrSpecularNormal(surface);
+            Vec3 direction=pbrSampleReflection(normal,view,0,0,0);
+            if (dot(normal,view)<=0 || dot(direction,hit.geometricNormal)<=0) continue;
+            Ray ray(offsetRayOrigin(hit.position,hit.geometricNormal,direction,hit.t),direction);
+            bool escapes=!isOccluded(ray,1.e30f,scene);
+            if (isCoat) coatEscapes=escapes; else baseEscapes=escapes;
+            if (escapes) {
+                Vec3 coefficient=isCoat?Vec3(weights.coat,weights.coat,weights.coat):baseCoefficient;
+                addPathRadiance(path,hadamard(path.throughput,hadamard(coefficient,environmentRadiance(scene.environment,direction))));
+            }
+        }
+    }
+    Vec3 direction;
+    if (coat || specular) {
+        float u=randomFloat(path.rngState),v=randomFloat(path.rngState);
+        Vec3 normal=coat?surface.coatNormal:pbrSpecularNormal(surface);
+        direction=pbrSampleReflection(normal,view,coat?surface.coatRoughness:surface.roughness,u,v);
+        if (dot(normal,view)<=0) { path.active=false; return direction; }
+    } else {
+        float probability=diffuseEnvironmentProbability(scene);
+        direction=probability>0 && randomFloat(path.rngState)<probability ?
+            samplePathEnvironment(scene,path.rngState).direction : sampleCosineHemisphere(surface.normal,path.rngState);
+    }
+    if (dot(direction,hit.geometricNormal)<=0) { path.active=false; return direction; }
+    if (delta) {
+        float mass=coat?weights.coat:weights.specular;
+        Vec3 coefficient=coat?Vec3(weights.coat,weights.coat,weights.coat):baseCoefficient;
+        path.throughput=hadamard(path.throughput,coefficient)/mass;
+        path.specularBounce=true;
+        path.previousBsdfPdf=0;
+        if (coat?coatEscapes:baseEscapes) path.active=false;
+    } else {
+        float pdf;
+        Vec3 value=evaluateGltfPbrCos(surface,view,direction,diffuseContinuationPdf(scene,surface.normal,direction),pdf);
+        if (!(pdf>0)) { path.active=false; return direction; }
+        path.throughput=hadamard(path.throughput,value)/pdf;
+        path.previousBsdfPdf=pdf;
+        path.specularBounce=false;
+    }
     return direction;
 }
 

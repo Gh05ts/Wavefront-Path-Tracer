@@ -53,3 +53,41 @@ float schlickReflectance(float cosine, float refractionRatio) {
     r0 *= r0;
     return r0 + (1.0f - r0) * powf(1.0f - cosine, 5.0f);
 }
+
+// Unpolarized Fresnel for eta = incident IOR / transmitted IOR. Schlick's
+// incident-angle approximation is especially inaccurate on dielectric exits.
+__device__ float dielectricReflectance(float cosine, float eta) {
+    if (eta == 1.0f) return 0.0f;
+    cosine = fminf(1.0f, fmaxf(0.0f, cosine));
+    float sin2Transmitted = eta * eta * fmaxf(0.0f, 1.0f - cosine * cosine);
+    if (sin2Transmitted >= 1.0f) return 1.0f;
+    float transmittedCosine = sqrtf(1.0f - sin2Transmitted);
+    float perpendicular = (eta * cosine - transmittedCosine) / (eta * cosine + transmittedCosine);
+    float parallel = (cosine - eta * transmittedCosine) / (cosine + eta * transmittedCosine);
+    return 0.5f * (perpendicular * perpendicular + parallel * parallel);
+}
+
+#define WAVEFRONT_HAS_DIELECTRIC_INTERFACE 1
+__device__ DielectricInterface dielectricInterface(const Vec3& incident,
+    const Vec3& geometricNormal, Vec3 shadingNormal, float ior) {
+    bool frontFace = dot(incident, geometricNormal) < 0.0f;
+    Vec3 geometricFacing = frontFace ? geometricNormal : -geometricNormal;
+    if (dot(shadingNormal, geometricNormal) < 0.0f) shadingNormal = -shadingNormal;
+    Vec3 normal = frontFace ? shadingNormal : -shadingNormal;
+    float eta = frontFace ? 1.0f / ior : ior;
+    if (dot(incident, normal) >= 0.0f) normal = geometricFacing;
+    float reflectance = dielectricReflectance(dot(-incident, normal), eta);
+    Vec3 reflection = reflect(incident, normal);
+    Vec3 transmission = refract(incident, normal, eta);
+    // Smooth/normal-mapped normals may send reflection into the solid or
+    // transmission back out of it. Recompute the entire interface consistently
+    // before sampling either branch; winding alone defines the medium boundary.
+    if (dot(reflection, geometricFacing) <= 0.0f ||
+        (reflectance < 1.0f && dot(transmission, geometricFacing) >= 0.0f)) {
+        normal = geometricFacing;
+        reflectance = dielectricReflectance(dot(-incident, normal), eta);
+        reflection = reflect(incident, normal);
+        transmission = refract(incident, normal, eta);
+    }
+    return {normal, reflection, transmission, eta, reflectance, frontFace};
+}

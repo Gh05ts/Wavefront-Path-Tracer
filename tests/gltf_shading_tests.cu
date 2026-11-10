@@ -26,6 +26,12 @@ __global__ void measure(Scene scene, Vec3* results) {
     results[1] = surface.f0;
     results[2] = Vec3(surface.roughness, getMaterialOpacity(scene.materials[1], Vec2{}, Vec2{}, scene), 0);
     results[3] = surface.diffuse;
+    Hit baseHit=hit;baseHit.normal=Vec3(.6f,0,.8f);
+    auto pbr=getGltfPbrSurface(scene.materials[2],hit,baseHit,scene);
+    results[4]=pbr.dielectricF0;
+    results[5]=Vec3(pbr.dielectricF90,pbr.coat,pbr.coatRoughness);
+    results[6]=pbr.coatNormal;
+    results[7]=pbr.normal;
 }
 
 int main() {
@@ -39,19 +45,24 @@ int main() {
         glossy.albedo = Vec3(.8f,.7f,.6f); glossy.specular = Vec3(.5f,.4f,.3f);
         glossy.glossiness = .8f; glossy.opacity = .6f;
         glossy.albedoTexture.texture = glossy.specularGlossinessTexture.texture = 0;
-        host.materials = {diffuse, glossy};
+        Material pbr{};pbr.type=MaterialType::Diffuse;pbr.gltfPbrWorkflow=true;pbr.ior=1.5f;
+        pbr.specularWeight=.6f;pbr.specularColor=Vec3(2,1,.5f);
+        pbr.specularWeightTexture.texture=pbr.specularColorTexture.texture=0;
+        pbr.clearcoat=.8f;pbr.clearcoatRoughness=.4f;
+        pbr.clearcoatTexture.texture=pbr.clearcoatRoughnessTexture.texture=0;
+        host.materials = {diffuse, glossy, pbr};
         host.textures.push_back(ObjTexture{1,1,{128,64,32,128}});
         PunctualLight light; light.position = Vec3(0,0,2); light.intensity = Vec3(8,8,8);
         host.punctualLights.push_back(light);
         Vec3* deviceResult = nullptr;
-        checked(cudaMalloc(&deviceResult, 4*sizeof(Vec3)));
+        checked(cudaMalloc(&deviceResult, 8*sizeof(Vec3)));
         auto run = [&]() {
             DeviceScene device = uploadScene(host);
             measure<<<1,1>>>(device.scene, deviceResult);
             checked(cudaGetLastError());
-            Vec3 result[4]; checked(cudaMemcpy(result, deviceResult, sizeof result, cudaMemcpyDeviceToHost));
+            Vec3 result[8]; checked(cudaMemcpy(result, deviceResult, sizeof result, cudaMemcpyDeviceToHost));
             destroyDeviceScene(device);
-            return std::vector<Vec3>(result,result+4);
+            return std::vector<Vec3>(result,result+8);
         };
         auto visible = run();
         require(std::abs(visible[0].x - 1.0f/3.14159265359f) < 1e-5f, "Analytic point-light irradiance");
@@ -60,6 +71,9 @@ int main() {
         require(std::abs(visible[2].x - (1-.8f*128/255)) < 1e-6f, "Glossiness alpha remains linear");
         require(std::abs(visible[2].y - .6f*128/255) < 1e-6f, "Opacity alpha remains linear");
         require(std::abs(visible[3].x - .8f*srgb) < 1e-6f, "Diffuse factor times linear texture");
+        require(std::abs(visible[4].x-.04f*2*srgb*.6f*128/255)<1.e-6f,"Specular color sRGB and strength alpha");
+        require(length(visible[5]-Vec3(.6f*128/255,.8f*128/255,.4f*64/255))<1.e-6f,"Specular/coat texture channels stay linear");
+        require(length(visible[6]-Vec3(0,0,1))<1.e-6f&&length(visible[7]-Vec3(.6f,0,.8f))<1.e-6f,"Coat must not inherit the base normal map");
         host.spheres.emplace_back(Sphere{Vec3(0,0,1),.2f,0});
         require(lengthSquared(run()[0]) == 0, "Punctual shadow ray is occluded");
         // A blocker beyond the emitter must not shadow a point light.

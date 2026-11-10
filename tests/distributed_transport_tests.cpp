@@ -170,6 +170,7 @@ int main() {
         original.hasConfiguration = true;
         original.configuration.width = 640;
         original.configuration.enableCaustics = true;
+        original.configuration.indirectRadianceClamp = 2.5f;
         original.configuration.scene.preset = ScenePreset::Crystal;
         original.configuration.scene.name = "crystal";
         original.configuration.scene.environmentFilename = "lighting/studio.hdr";
@@ -180,6 +181,7 @@ int main() {
         const auto* value = std::get_if<WorkerHelloAcceptedMessage>(&decoded);
         valid &= check(value != nullptr && value->hasConfiguration &&
             value->configuration.width == 640 && value->configuration.enableCaustics &&
+            value->configuration.indirectRadianceClamp == 2.5f &&
             value->configuration.scene.preset == ScenePreset::Crystal &&
             value->configuration.scene.environmentFilename == "lighting/studio.hdr" &&
             value->configuration.scene.environmentIntensity == 3.5f &&

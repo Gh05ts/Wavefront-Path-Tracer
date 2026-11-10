@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -106,6 +107,10 @@ RenderDriver::RenderDriver(const DeviceScene& deviceScene, Camera camera, Render
       renderFingerprint_(computeRenderFingerprint(config_, sceneConfig_)) {}
 
 bool RenderDriver::validateConfiguration() const {
+    if (!std::isfinite(config_.indirectRadianceClamp) || config_.indirectRadianceClamp < 0.0f) {
+        std::cerr << "Indirect radiance clamp must be finite and nonnegative\n";
+        return false;
+    }
     if (config_.width == 0 || config_.height == 0) {
         std::cerr << "Render dimensions must be greater than zero\n";
         return false;
@@ -265,7 +270,7 @@ void RenderDriver::createWavefrontGraph() {
     generatePrimaryRays<<<blockCount_, config_.blockSize, 0, resources_.traceStream>>>(
         resources_.rayQueue, resources_.devicePathStates, camera_, width_, height_,
         resources_.renderSession.deviceSampleIndex, resources_.deviceRenderTile,
-        config_.rngStrategy);
+        config_.rngStrategy, config_.indirectRadianceClamp);
 
     RayQueue currentRayQueue = resources_.rayQueue;
     RayQueue nextRays = resources_.nextRayQueue;
@@ -314,6 +319,7 @@ void RenderDriver::launchPersistentTile(const RenderTile& renderTile) {
     Vec3* renderFramebuffer = resources_.renderSession.deviceFramebuffer;
     PhotonGrid renderPhotonGrid = resources_.shadingPhotonGrid;
     float renderPhotonGatherRadius = config_.causticGatherRadius;
+    float renderIndirectRadianceClamp = config_.indirectRadianceClamp;
     void* kernelArguments[] = {
         &initialRays,
         &secondaryRays,
@@ -332,7 +338,8 @@ void RenderDriver::launchPersistentTile(const RenderTile& renderTile) {
         &renderShadingNormalDebug,
         &renderFramebuffer,
         &renderPhotonGrid,
-        &renderPhotonGatherRadius};
+        &renderPhotonGatherRadius,
+        &renderIndirectRadianceClamp};
 
     CUDA_CHECK(cudaLaunchCooperativeKernel(
         reinterpret_cast<void*>(persistentWavefrontTrace),

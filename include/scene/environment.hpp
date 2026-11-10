@@ -10,7 +10,7 @@ struct HostEnvironment {
     std::vector<EnvironmentAlias> alias;
 };
 
-// Sampling probabilities include a 1% uniform-solid-angle component, preserving
-// support across bilinear reconstruction around otherwise black texels.
+// Importance weights cover the bilinear texture footprint in adjacent cells.
+// A further 1% uniform-solid-angle component preserves global support.
 void buildEnvironmentDistribution(HostEnvironment& map);
 HostEnvironment loadEnvironmentMap(const char* filename);

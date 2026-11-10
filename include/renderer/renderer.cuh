@@ -19,6 +19,16 @@ __device__ Vec3 sampleCosineHemisphere(const Vec3& normal, RngState& rngState);
 __device__ Vec3 reflect(const Vec3& incident, const Vec3& normal);
 __device__ Vec3 refract(const Vec3& incident, const Vec3& normal, float eta);
 __device__ float schlickReflectance(float cosine, float refractionRatio);
+struct DielectricInterface {
+    Vec3 normal;
+    Vec3 reflection;
+    Vec3 transmission;
+    float eta;
+    float reflectance;
+    bool frontFace;
+};
+__device__ DielectricInterface dielectricInterface(const Vec3& incident,
+    const Vec3& geometricNormal, Vec3 shadingNormal, float ior);
 __device__ Vec3 gatherCaustics(const Hit& hit, PhotonGrid grid, float radius);
 
 __global__
@@ -39,7 +49,8 @@ void generatePrimaryRays(
     uint32_t height,
     const uint32_t* sampleIndex,
     const RenderTile* tile,
-    RngStrategy rngStrategy
+    RngStrategy rngStrategy,
+    float indirectRadianceClamp = 0.0f
 );
 
 __global__
@@ -87,5 +98,6 @@ void persistentWavefrontTrace(
     bool shadingNormalDebug,
     Vec3* framebuffer,
     PhotonGrid photonGrid,
-    float photonGatherRadius
+    float photonGatherRadius,
+    float indirectRadianceClamp = 0.0f
 );

@@ -71,7 +71,7 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
                     }
                 }
 
-                path.radiance += hadamard(path.throughput, getMaterialEmission(material, hit, scene)) * misWeight;
+                addPathRadiance(path, hadamard(path.throughput, getMaterialEmission(material, hit, scene)) * misWeight, true);
                 path.active = false;
                 framebuffer[path.pixelIndex] += path.radiance;
             } else {
@@ -86,26 +86,21 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
                 MaterialType materialType = material.type == MaterialType::Diffuse && getMaterialMetallic(material, shadedHit, scene) > 0.5f ? MaterialType::Metal : material.type;
                 float roughness = getMaterialRoughness(material, shadedHit, scene);
 
-                switch (materialType) {
+                if (material.gltfPbrWorkflow) {
+                    sampleDirectLight(path, hit, shadedHit, material, scene);
+                    sampleDirectPunctualLight(path, hit, shadedHit, material, scene);
+                    sampleDirectEnvironment(path, hit, shadedHit, material, scene);
+                    direction = continueGltfPbrSurface(path, hit, shadedHit, material, scene, maxDepth);
+                } else switch (materialType) {
                 case MaterialType::Diffuse: {
                     sampleDirectLight(path, hit, shadedHit, material, scene);
                     sampleDirectPunctualLight(path, hit, shadedHit, material, scene);
                     sampleDirectEnvironment(path, hit, shadedHit, material, scene);
                     if (photonGrid.heads != nullptr) {
                         Vec3 causticIrradiance = gatherCaustics(shadedHit, photonGrid, photonGatherRadius);
-                        path.radiance += hadamard(path.throughput, hadamard(albedo, causticIrradiance));
+                        addPathRadiance(path, hadamard(path.throughput, hadamard(albedo, causticIrradiance)));
                     }
-                    Vec3 samplingNormal = shadedHit.normal;
-                    direction = sampleCosineHemisphere(samplingNormal, path.rngState);
-
-                    if (dot(direction, hit.geometricNormal) <= 0.0f) {
-                        samplingNormal = hit.geometricNormal;
-                        direction = sampleCosineHemisphere(samplingNormal, path.rngState);
-                    }
-
-                    path.throughput = hadamard(path.throughput, albedo);
-                    path.previousBsdfPdf = fmaxf(0.0f, dot(samplingNormal, direction)) * 0.31830988618f;
-                    path.specularBounce = false;
+                    direction = continueDiffuseSurface(path, hit, shadedHit, material, scene);
                     break;
                 }
 
@@ -113,11 +108,18 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
                     sampleDirectLight(path, hit, shadedHit, material, scene);
                     sampleDirectPunctualLight(path, hit, shadedHit, material, scene);
                     sampleDirectEnvironment(path, hit, shadedHit, material, scene);
-                    direction = continueSpecGloss(path, hit, shadedHit, material, scene);
+                    direction = continueGlossySurface(path, hit, shadedHit, material, scene);
                     break;
                 }
 
                 case MaterialType::Metal: {
+                    if (roughness > 0.0f) {
+                        sampleDirectLight(path, hit, shadedHit, material, scene);
+                        sampleDirectPunctualLight(path, hit, shadedHit, material, scene);
+                        sampleDirectEnvironment(path, hit, shadedHit, material, scene);
+                        direction = continueGlossySurface(path, hit, shadedHit, material, scene);
+                        break;
+                    }
                     path.throughput = hadamard(path.throughput, albedo);
                     Vec3 reflected = reflect(normalize(path.ray.direction), shadedHit.normal);
                     direction = normalize(reflected + roughness * randomInUnitSphere(path.rngState));
@@ -131,33 +133,7 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
                 }
 
                 case MaterialType::Dielectric: {
-                    path.throughput = hadamard(path.throughput, albedo);
-                    Vec3 incident = normalize(path.ray.direction);
-                    bool frontFace = dot(incident, shadedHit.normal) < 0.0f;
-                    Vec3 normal = frontFace ? shadedHit.normal : -shadedHit.normal;
-                    float refractionRatio = frontFace ? 1.0f / material.ior : material.ior;
-                    float cosTheta = fminf(dot(-incident, normal), 1.0f);
-                    float sinTheta = sqrtf(fmaxf(0.0f, 1.0f - cosTheta * cosTheta));
-
-                    bool reflected = refractionRatio * sinTheta > 1.0f || schlickReflectance(cosTheta, refractionRatio) > randomFloat(path.rngState);
-
-                    if (reflected)
-                        direction = reflect(incident, normal);
-                    else {
-                        direction = refract(incident, normal, refractionRatio);
-
-                        if (frontFace) {
-                            path.mediumMaterial = hit.material;
-                            path.mediumDensity = material.volumeDensity * getMaterialThickness(material, hit, scene);
-                        } else {
-                            path.mediumMaterial = 0xffffffffu;
-                            path.mediumDensity = 1.0f;
-                        }
-                    }
-
-                    path.specularBounce = true;
-                    path.previousBsdfPdf = 0.0f;
-
+                    direction = continueDielectricSurface(path, hit, shadedHit, material, scene, maxDepth);
                     break;
                 }
 
@@ -166,8 +142,7 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
                 }
 
                 if (path.active) {
-                    float offsetDirection = dot(direction, hit.geometricNormal) >= 0.0f ? 1.0f : -1.0f;
-                    path.ray.origin = hit.position + offsetDirection * hit.geometricNormal * 0.001f;
+                    path.ray.origin = offsetRayOrigin(hit.position, hit.geometricNormal, direction, hit.t);
                     path.ray.direction = direction;
                     ++path.depth;
 
@@ -175,7 +150,7 @@ void shadePaths(RayQueue rays, const IntersectionResult* results, RayQueue nextR
                         path.active = false;
                         framebuffer[path.pixelIndex] += path.radiance;
                     } else if (path.depth >= russianRouletteStartDepth) {
-                        float survivalProbability = fminf(0.95f, fmaxf(0.05f, fmaxf(path.throughput.x, fmaxf(path.throughput.y, path.throughput.z))));
+                        float survivalProbability = fminf(0.95f, fmaxf(0.05f, path.etaScale * fmaxf(path.throughput.x, fmaxf(path.throughput.y, path.throughput.z))));
 
                         if (randomFloat(path.rngState) > survivalProbability) {
                             path.active = false;
@@ -253,7 +228,7 @@ __device__ void shadePersistentPath(PathState& path, const TraceResult& result, 
                 misWeight = powerHeuristic(path.previousBsdfPdf, lightPdf);
             }
         }
-        path.radiance += hadamard(path.throughput, getMaterialEmission(material, hit, scene)) * misWeight;
+        addPathRadiance(path, hadamard(path.throughput, getMaterialEmission(material, hit, scene)) * misWeight, true);
         path.active = false;
         framebuffer[path.pixelIndex] += path.radiance;
         return;
@@ -269,24 +244,21 @@ __device__ void shadePersistentPath(PathState& path, const TraceResult& result, 
     MaterialType materialType = material.type == MaterialType::Diffuse && getMaterialMetallic(material, shadedHit, scene) > 0.5f ? MaterialType::Metal : material.type;
     float roughness = getMaterialRoughness(material, shadedHit, scene);
 
-    switch (materialType) {
+    if (material.gltfPbrWorkflow) {
+        sampleDirectLight(path, hit, shadedHit, material, scene);
+        sampleDirectPunctualLight(path, hit, shadedHit, material, scene);
+        sampleDirectEnvironment(path, hit, shadedHit, material, scene);
+        direction = continueGltfPbrSurface(path, hit, shadedHit, material, scene, maxDepth);
+    } else switch (materialType) {
     case MaterialType::Diffuse: {
         sampleDirectLight(path, hit, shadedHit, material, scene);
         sampleDirectPunctualLight(path, hit, shadedHit, material, scene);
         sampleDirectEnvironment(path, hit, shadedHit, material, scene);
         if (photonGrid.heads != nullptr) {
             Vec3 causticIrradiance = gatherCaustics(shadedHit, photonGrid, photonGatherRadius);
-            path.radiance += hadamard(path.throughput, hadamard(albedo, causticIrradiance));
+            addPathRadiance(path, hadamard(path.throughput, hadamard(albedo, causticIrradiance)));
         }
-        Vec3 samplingNormal = shadedHit.normal;
-        direction = sampleCosineHemisphere(samplingNormal, path.rngState);
-        if (dot(direction, hit.geometricNormal) <= 0.0f) {
-            samplingNormal = hit.geometricNormal;
-            direction = sampleCosineHemisphere(samplingNormal, path.rngState);
-        }
-        path.throughput = hadamard(path.throughput, albedo);
-        path.previousBsdfPdf = fmaxf(0.0f, dot(samplingNormal, direction)) * 0.31830988618f;
-        path.specularBounce = false;
+        direction = continueDiffuseSurface(path, hit, shadedHit, material, scene);
         break;
     }
 
@@ -294,11 +266,18 @@ __device__ void shadePersistentPath(PathState& path, const TraceResult& result, 
         sampleDirectLight(path, hit, shadedHit, material, scene);
         sampleDirectPunctualLight(path, hit, shadedHit, material, scene);
         sampleDirectEnvironment(path, hit, shadedHit, material, scene);
-        direction = continueSpecGloss(path, hit, shadedHit, material, scene);
+        direction = continueGlossySurface(path, hit, shadedHit, material, scene);
         break;
     }
 
     case MaterialType::Metal: {
+        if (roughness > 0.0f) {
+            sampleDirectLight(path, hit, shadedHit, material, scene);
+            sampleDirectPunctualLight(path, hit, shadedHit, material, scene);
+            sampleDirectEnvironment(path, hit, shadedHit, material, scene);
+            direction = continueGlossySurface(path, hit, shadedHit, material, scene);
+            break;
+        }
         path.throughput = hadamard(path.throughput, albedo);
         Vec3 reflected = reflect(normalize(path.ray.direction), shadedHit.normal);
         direction = normalize(reflected + roughness * randomInUnitSphere(path.rngState));
@@ -310,28 +289,7 @@ __device__ void shadePersistentPath(PathState& path, const TraceResult& result, 
     }
 
     case MaterialType::Dielectric: {
-        path.throughput = hadamard(path.throughput, albedo);
-        Vec3 incident = normalize(path.ray.direction);
-        bool frontFace = dot(incident, shadedHit.normal) < 0.0f;
-        Vec3 normal = frontFace ? shadedHit.normal : -shadedHit.normal;
-        float refractionRatio = frontFace ? 1.0f / material.ior : material.ior;
-        float cosTheta = fminf(dot(-incident, normal), 1.0f);
-        float sinTheta = sqrtf(fmaxf(0.0f, 1.0f - cosTheta * cosTheta));
-        bool reflected = refractionRatio * sinTheta > 1.0f || schlickReflectance(cosTheta, refractionRatio) > randomFloat(path.rngState);
-        if (reflected)
-            direction = reflect(incident, normal);
-        else {
-            direction = refract(incident, normal, refractionRatio);
-            if (frontFace) {
-                path.mediumMaterial = hit.material;
-                path.mediumDensity = material.volumeDensity * getMaterialThickness(material, hit, scene);
-            } else {
-                path.mediumMaterial = 0xffffffffu;
-                path.mediumDensity = 1.0f;
-            }
-        }
-        path.specularBounce = true;
-        path.previousBsdfPdf = 0.0f;
+        direction = continueDielectricSurface(path, hit, shadedHit, material, scene, maxDepth);
         break;
     }
 
@@ -340,15 +298,14 @@ __device__ void shadePersistentPath(PathState& path, const TraceResult& result, 
     }
 
     if (path.active) {
-        float offsetDirection = dot(direction, hit.geometricNormal) >= 0.0f ? 1.0f : -1.0f;
-        path.ray.origin = hit.position + offsetDirection * hit.geometricNormal * 0.001f;
+        path.ray.origin = offsetRayOrigin(hit.position, hit.geometricNormal, direction, hit.t);
         path.ray.direction = direction;
         ++path.depth;
         if (path.depth >= maxDepth) {
             path.active = false;
             framebuffer[path.pixelIndex] += path.radiance;
         } else if (path.depth >= russianRouletteStartDepth) {
-            float survivalProbability = fminf(0.95f, fmaxf(0.05f, fmaxf(path.throughput.x, fmaxf(path.throughput.y, path.throughput.z))));
+            float survivalProbability = fminf(0.95f, fmaxf(0.05f, path.etaScale * fmaxf(path.throughput.x, fmaxf(path.throughput.y, path.throughput.z))));
             if (randomFloat(path.rngState) > survivalProbability) {
                 path.active = false;
                 framebuffer[path.pixelIndex] += path.radiance;

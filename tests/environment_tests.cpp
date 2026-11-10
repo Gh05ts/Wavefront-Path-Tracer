@@ -60,8 +60,10 @@ void testDistribution() {
         bright+=index==0;
         require(std::abs(sample.pdf-environmentPdf(env,sample.direction))<1e-3f, "Rotated near-pole sample/PDF mismatch");
     }
-    require(bright>19500,"Bright texel should dominate importance sampling");
+    require(std::abs(bright/20000.f-map.probabilities[0])<.015f,"Filtered bright-cell alias frequency");
     require(map.probabilities[map.width*map.height-1]>0,"Black texels retain sampling support");
+    require(map.probabilities[map.width-1]>.01f && map.probabilities[1]>.01f && map.probabilities[map.width]>.01f,
+        "Bilinear sun shoulders must receive importance mass, including longitude wrap and pole clamp");
     map.pixels[0].x=-1; rejects([&]{buildEnvironmentDistribution(map);},"Negative HDR radiance accepted");
     map.pixels[0].x=std::numeric_limits<float>::infinity();
     rejects([&]{buildEnvironmentDistribution(map);},"Infinite HDR radiance accepted");

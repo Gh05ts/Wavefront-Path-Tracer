@@ -24,6 +24,7 @@ struct DistributedWorkerConfiguration {
     uint32_t causticPhotonCount = 1048576;
     uint32_t causticMaxDepth = 8;
     float causticGatherRadius = 0.06f;
+    float indirectRadianceClamp = 10.0f;
     bool pushAssets = false;
     SceneConfig scene;
 };
@@ -51,6 +52,7 @@ inline DistributedWorkerConfiguration makeDistributedWorkerConfiguration(
     configuration.causticPhotonCount = render.causticPhotonCount;
     configuration.causticMaxDepth = render.causticMaxDepth;
     configuration.causticGatherRadius = render.causticGatherRadius;
+    configuration.indirectRadianceClamp = render.indirectRadianceClamp;
     configuration.pushAssets = render.pushAssets;
     configuration.scene = scene;
     return configuration;
@@ -79,6 +81,7 @@ inline void applyDistributedWorkerConfiguration(
     render.causticPhotonCount = configuration.causticPhotonCount;
     render.causticMaxDepth = configuration.causticMaxDepth;
     render.causticGatherRadius = configuration.causticGatherRadius;
+    render.indirectRadianceClamp = configuration.indirectRadianceClamp;
     render.pushAssets = configuration.pushAssets;
     scene = configuration.scene;
 }

@@ -26,13 +26,13 @@ DistributedTaskResult resultFor(const TaskAssignmentMessage& assignment) {
 }
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     bool valid = true;
 
     {
         SceneConfig scene;
         scene.preset = ScenePreset::Sponza;
-        scene.gltfFilename = "../../assets/sponza/Sponza.gltf";
+        scene.gltfFilename = argc > 1 ? argv[1] : "../../assets/sponza/Sponza.gltf";
         DistributedAssetCatalog catalog;
         std::string assetError;
         valid &= check(buildDistributedAssetCatalog(scene, catalog, &assetError),

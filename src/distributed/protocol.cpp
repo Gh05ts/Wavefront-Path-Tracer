@@ -238,6 +238,7 @@ void appendWorkerConfiguration(Writer& writer, const DistributedWorkerConfigurat
     appendBool(configuration.enableCausticGather);
     writer.u32(configuration.causticPhotonCount); writer.u32(configuration.causticMaxDepth);
     writer.float32(configuration.causticGatherRadius); appendBool(configuration.pushAssets);
+    writer.float32(configuration.indirectRadianceClamp);
 
     const SceneConfig& scene = configuration.scene;
     writer.u32(static_cast<uint32_t>(scene.preset));
@@ -284,6 +285,9 @@ bool readWorkerConfiguration(Reader& reader, DistributedWorkerConfiguration& con
         return false;
     if (!reader.u32(configuration.causticPhotonCount) || !reader.u32(configuration.causticMaxDepth) ||
         !reader.float32(configuration.causticGatherRadius) || !readBool(configuration.pushAssets))
+        return false;
+    if (!reader.float32(configuration.indirectRadianceClamp) ||
+        !std::isfinite(configuration.indirectRadianceClamp) || configuration.indirectRadianceClamp < 0)
         return false;
 
     SceneConfig& scene = configuration.scene;
