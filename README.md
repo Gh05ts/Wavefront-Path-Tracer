@@ -123,6 +123,8 @@ For repeatable render timings, see [the benchmark instructions](benchmarks/READM
 
 For HDR training frames and temporal guides for the separate denoiser project,
 see [denoising dataset capture](docs/DENOISING_DATA.md).
+The [NTASAD adaptive integration plan](docs/NTASAD_ADAPTIVE.md) maps the sampler
+and companion dataset work to the renderer's current uniform task interface.
 
 `ARCHITECTURE.md` is the current data-flow and ownership map. The main source
 boundaries are:

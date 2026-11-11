@@ -156,3 +156,78 @@ void writeCapturedFrame(const std::filesystem::path& directory,
         throw;
     }
 }
+
+void writeCapturedSampleLayers(const std::filesystem::path& directory,
+    uint32_t width, uint32_t height, const std::vector<CapturedSampleLayer>& layers,
+    nlohmann::json metadata) {
+    if (!width || !height || width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+        height > static_cast<uint32_t>(std::numeric_limits<int>::max()) || layers.empty() || !metadata.is_object())
+        throw std::invalid_argument("Invalid sample-layer dimensions or metadata");
+    const size_t count = static_cast<size_t>(width) * height;
+    Json descriptions = Json::array();
+    for (size_t i = 0; i < layers.size(); ++i) {
+        const auto& layer = layers[i];
+        if (!layer.samples || layer.samples > 32 || (layer.samples & (layer.samples - 1)) ||
+            layer.radiance.size() != count ||
+            static_cast<uint64_t>(layer.sampleStart) + layer.samples > std::numeric_limits<uint32_t>::max())
+            throw std::invalid_argument("Invalid sample-layer count, range or buffer");
+        for (const auto& value : layer.radiance)
+            if (!finite(value) || value.x < 0 || value.y < 0 || value.z < 0)
+                throw std::invalid_argument("Sample layers must be finite nonnegative RGB");
+        for (size_t j = 0; j < i; ++j) {
+            const auto& other = layers[j];
+            if (layer.samples == other.samples ||
+                (layer.sampleStart < static_cast<uint64_t>(other.sampleStart) + other.samples &&
+                 other.sampleStart < static_cast<uint64_t>(layer.sampleStart) + layer.samples))
+                throw std::invalid_argument("Duplicate SPP or overlapping independent sample layers");
+        }
+        std::string prefix = "spp_" + std::to_string(layer.samples);
+        descriptions.push_back({{"samples", layer.samples}, {"sample_start", layer.sampleStart},
+            {"channels", Json::array({prefix + ".R", prefix + ".G", prefix + ".B"})}});
+    }
+    std::filesystem::path staging = directory.string() + ".partial";
+    if (std::filesystem::exists(directory) || std::filesystem::exists(staging))
+        throw std::runtime_error("Sample-layer output or staging directory already exists");
+    if (!directory.parent_path().empty())
+        std::filesystem::create_directories(directory.parent_path());
+    if (!std::filesystem::create_directory(staging))
+        throw std::runtime_error("Could not create sample-layer staging directory");
+    try {
+        namespace Exr = OPENEXR_IMF_NAMESPACE;
+        Exr::Header header(static_cast<int>(width), static_cast<int>(height));
+        Exr::FrameBuffer buffer;
+        for (size_t i = 0; i < layers.size(); ++i) {
+            const float* planes[] = {&layers[i].radiance[0].x, &layers[i].radiance[0].y, &layers[i].radiance[0].z};
+            for (size_t c = 0; c < 3; ++c) {
+                std::string name = descriptions[i]["channels"][c].get<std::string>();
+                header.channels().insert(name, Exr::Channel(Exr::FLOAT));
+                buffer.insert(name, Exr::Slice(Exr::FLOAT, reinterpret_cast<char*>(const_cast<float*>(planes[c])),
+                    sizeof(Vec3), sizeof(Vec3) * width));
+            }
+        }
+        {
+            Exr::OutputFile image((staging / "layers.exr").c_str(), header);
+            image.setFrameBuffer(buffer);
+            image.writePixels(static_cast<int>(height));
+        }
+        metadata["schema"] = "cuda-wavefront-sample-layers";
+        metadata["version"] = 1;
+        metadata["width"] = width;
+        metadata["height"] = height;
+        metadata["image"] = "layers.exr";
+        metadata["image_sha256"] = fileDigest(staging / "layers.exr");
+        metadata["layers"] = descriptions;
+        metadata["conventions"] = frameConventions();
+        if (metadata.contains("render") && metadata["render"].is_object())
+            for (const char* key : {"sample_start", "samples", "reference_sample_start", "reference_samples"})
+                metadata["render"].erase(key);
+        std::ofstream manifest(staging / "manifest.json");
+        manifest.exceptions(std::ios::failbit | std::ios::badbit);
+        manifest << metadata.dump(2) << '\n';
+        manifest.close();
+        std::filesystem::rename(staging, directory);
+    } catch (...) {
+        std::filesystem::remove_all(staging);
+        throw;
+    }
+}

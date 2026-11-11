@@ -23,3 +23,14 @@ nlohmann::json frameConventions();
 // Existing output directories are rejected; failure never publishes a manifest.
 void writeCapturedFrame(const std::filesystem::path& directory,
     const CapturedFrame& frame, nlohmann::json metadata);
+
+struct CapturedSampleLayer {
+    uint32_t samples = 0;
+    uint32_t sampleStart = 0;
+    std::vector<Vec3> radiance; // Independent linear RGB means, not prefix averages.
+};
+
+// Layer-only companion capture: no duplicate reference rendering or guide pass.
+void writeCapturedSampleLayers(const std::filesystem::path& directory,
+    uint32_t width, uint32_t height, const std::vector<CapturedSampleLayer>& layers,
+    nlohmann::json metadata);

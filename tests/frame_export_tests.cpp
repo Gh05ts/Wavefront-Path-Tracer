@@ -104,6 +104,46 @@ void exportTests(const std::filesystem::path& directory) {
     try { writeCapturedFrame(bad, frame, metadata()); } catch (const std::invalid_argument&) { rejected = true; }
     require(rejected && !std::filesystem::exists(bad), "Non-finite capture was published");
 }
+
+void layerTests(const std::filesystem::path& directory) {
+    auto output = directory / "sample-layers";
+    std::vector<CapturedSampleLayer> layers{
+        {1, 4100, std::vector<Vec3>(6, Vec3(0.25f, 2.0f, 64.0f))},
+        {2, 4101, std::vector<Vec3>(6, Vec3(0.5f, 4.0f, 128.0f))}};
+    layers.back().radiance.back() = Vec3(1.0f, 3.0f, 200.0f);
+    writeCapturedSampleLayers(output, 3, 2, layers, metadata());
+    nlohmann::json manifest;
+    std::ifstream(output / "manifest.json") >> manifest;
+    require(manifest.at("schema") == "cuda-wavefront-sample-layers" &&
+        manifest.at("image_sha256").get<std::string>().size() == 64 &&
+        manifest.at("layers")[1].at("sample_start") == 4101, "Missing layer provenance");
+    require(!manifest.at("render").contains("reference_samples"), "Layer manifest claims an unrendered reference");
+    namespace Exr = OPENEXR_IMF_NAMESPACE;
+    Exr::InputFile input((output / "layers.exr").c_str());
+    require(input.header().channels().findChannel("reference.R") == nullptr,
+        "Layer-only export contains a duplicate reference");
+    std::vector<float> blue(6);
+    Exr::FrameBuffer buffer;
+    buffer.insert("spp_2.B", Exr::Slice(Exr::FLOAT, reinterpret_cast<char*>(blue.data()), sizeof(float), 3*sizeof(float)));
+    input.setFrameBuffer(buffer);
+    input.readPixels(0, 1);
+    require(blue.front() == 128.0f && blue.back() == 200.0f, "Layer EXR layout or HDR precision changed");
+    bool rejected = false;
+    try { writeCapturedSampleLayers(output, 3, 2, layers, metadata()); }
+    catch (const std::exception&) { rejected = true; }
+    require(rejected, "Existing sample layers were overwritten");
+    layers[1].sampleStart = 4100;
+    rejected = false;
+    try { writeCapturedSampleLayers(directory / "overlap", 3, 2, layers, metadata()); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    require(rejected && !std::filesystem::exists(directory / "overlap"), "Overlapping layers were exported");
+    layers[1].sampleStart = 4101;
+    layers[0].radiance[0].x = std::numeric_limits<float>::quiet_NaN();
+    rejected = false;
+    try { writeCapturedSampleLayers(directory / "bad-layers", 3, 2, layers, metadata()); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    require(rejected && !std::filesystem::exists(directory / "bad-layers"), "Non-finite layers were exported");
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -113,6 +153,7 @@ int main(int argc, char** argv) {
             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     try {
         exportTests(directory);
+        layerTests(directory);
         if (!keep) std::filesystem::remove_all(directory);
         return 0;
     } catch (const std::exception& error) {

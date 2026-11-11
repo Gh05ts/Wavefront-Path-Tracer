@@ -6,6 +6,10 @@ normalizes by the actual sample count, and exports float32 EXR input/reference
 pairs with JSON metadata. The main renderer's PPM output, task protocol, and
 checkpoint formats remain unchanged.
 
+For v5 NTASAD companion layers and verified v4 reference reuse, see the
+[v5 workflow](../../denoiser/dataset_generation/V5.md). It uses a separate
+layer-only export; the uniform paired-frame contract below remains unchanged.
+
 ```bash
 cmake -S . -B build -DPATHTRACER_BUILD_DATASET_CAPTURE=ON
 cmake --build build --target dataset_capture frame_export_tests --parallel 2

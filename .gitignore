@@ -2,3 +2,4 @@ build/
 benchmarks/
 __pycache__/
 .venv/
+.ntasad-backup/

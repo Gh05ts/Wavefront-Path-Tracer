@@ -159,6 +159,31 @@ int capture(const std::filesystem::path& configFile, const std::filesystem::path
         std::min<uint64_t>(requiredStride, std::numeric_limits<uint32_t>::max())));
     if (stride < requiredStride)
         throw std::invalid_argument("sample_stride must cover input and reference samples");
+    // Optional layer-only mode reserves the original noisy/reference intervals,
+    // but renders only the requested independent companion layers.
+    std::vector<std::pair<uint32_t, uint32_t>> sampleLayers;
+    if (root.contains("sample_layers")) {
+        const auto& layers = root.at("sample_layers");
+        if (!layers.is_array() || layers.empty())
+            throw std::invalid_argument("sample_layers must be a nonempty array");
+        uint32_t reservedReferences = integer(root, "reserved_reference_samples", referenceSamples);
+        if (reservedReferences < referenceSamples)
+            throw std::invalid_argument("Reserved references cannot be smaller than training references");
+        const uint64_t reservedEnd = static_cast<uint64_t>(samples) + reservedReferences;
+        for (const auto& layer : layers) {
+            uint32_t count = integer(layer, "samples", 0);
+            uint32_t offset = integer(layer, "offset", 0, true);
+            if (!count || count > 32 || (count & (count - 1)) ||
+                offset < reservedEnd || static_cast<uint64_t>(offset) + count > stride)
+                throw std::invalid_argument("Sample layers must be powers of two <=32 outside reserved ranges and inside stride");
+            for (const auto& previous : sampleLayers)
+                if (previous.first == count ||
+                    (offset < static_cast<uint64_t>(previous.second) + previous.first &&
+                     previous.second < static_cast<uint64_t>(offset) + count))
+                    throw std::invalid_argument("Sample layers have duplicate SPP or overlapping ranges");
+            sampleLayers.emplace_back(count, offset);
+        }
+    }
     uint64_t frameCount = root.at("frames").size();
     uint64_t stop = endFrame ? *endFrame : frameCount;
     if (firstFrame >= stop || stop > frameCount)
@@ -234,7 +259,10 @@ int capture(const std::filesystem::path& configFile, const std::filesystem::path
     auto tiles = createRenderTiles(config.width, config.height, config.tileWidth, config.tileHeight);
     for (size_t i = firstFrame; i < stop; ++i) {
         uint32_t start = static_cast<uint32_t>(sampleStart + i * stride);
-        std::cout << "Capturing frame " << i << ": " << samples << " input + " << referenceSamples << " reference SPP\n";
+        if (sampleLayers.empty())
+            std::cout << "Capturing frame " << i << ": " << samples << " input + " << referenceSamples << " reference SPP\n";
+        else
+            std::cout << "Capturing frame " << i << ": " << sampleLayers.size() << " independent sample layers\n";
         RenderDriver driver(scene.scene, cameras[i], config, sceneConfig);
         RenderTaskRenderer renderer(driver);
         CapturedFrame frame;
@@ -242,9 +270,16 @@ int capture(const std::filesystem::path& configFile, const std::filesystem::path
         frame.height = config.height;
         frame.samples = samples;
         frame.referenceSamples = referenceSamples;
-        frame.radiance = renderRange(renderer, tiles, taskFingerprint, config.width, config.height, start, samples);
-        frame.reference = renderRange(renderer, tiles, taskFingerprint, config.width, config.height, start + samples, referenceSamples);
-        frame.guides = captureGuides(scene.scene.scene, cameras[i], cameras[i == 0 ? 0 : i - 1], i > 0, config, tiles);
+        std::vector<CapturedSampleLayer> layers;
+        if (sampleLayers.empty()) {
+            frame.radiance = renderRange(renderer, tiles, taskFingerprint, config.width, config.height, start, samples);
+            frame.reference = renderRange(renderer, tiles, taskFingerprint, config.width, config.height, start + samples, referenceSamples);
+            frame.guides = captureGuides(scene.scene.scene, cameras[i], cameras[i == 0 ? 0 : i - 1], i > 0, config, tiles);
+        } else {
+            for (const auto& layer : sampleLayers)
+                layers.push_back({layer.first, start + layer.second,
+                    renderRange(renderer, tiles, taskFingerprint, config.width, config.height, start + layer.second, layer.first)});
+        }
         std::ostringstream fingerprintText;
         fingerprintText << std::hex << fingerprint;
         std::ostringstream sceneFingerprintText;
@@ -278,7 +313,11 @@ int capture(const std::filesystem::path& configFile, const std::filesystem::path
             metadata["geometry_fingerprint"] = geometryIdentity.str();
             metadata["capture_lighting"] = lighting->metadata();
         }
-        writeCapturedFrame(directories[i], frame, std::move(metadata));
+        if (sampleLayers.empty()) {
+            writeCapturedFrame(directories[i], frame, std::move(metadata));
+        } else {
+            writeCapturedSampleLayers(directories[i], config.width, config.height, layers, std::move(metadata));
+        }
         std::cout << "Wrote " << directories[i] << '\n';
     }
     return 0;
