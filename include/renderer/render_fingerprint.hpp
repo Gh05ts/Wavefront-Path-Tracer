@@ -3,7 +3,7 @@
 #include <cstdint>
 
 #include "../config.hpp"
-inline constexpr uint32_t rendererIntegratorVersion = 11;
+inline constexpr uint32_t rendererIntegratorVersion = 12;
 
 uint64_t computeRenderFingerprint(const RenderConfig& render, const SceneConfig& scene);
 

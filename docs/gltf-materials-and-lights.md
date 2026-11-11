@@ -93,6 +93,9 @@ not added here. Denoising albedo guides use the imported diffuse color/texture.
 
 ## Lights
 
+For Bistro's small instanced geometry, front-banner material, and display
+exposure corrections, see the [integrator-12 diagnosis](diagnostics/bistro-scene-fix.md).
+
 Point, spot and directional lights are instantiated only from nodes in the
 selected glTF scene. Parent transforms affect positions and normalized emission
 directions. Intensity, range and cone angles are not multiplied by node scale.

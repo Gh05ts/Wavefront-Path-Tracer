@@ -1,4 +1,5 @@
 #pragma once
+#include <cfloat>
 #include "specular_glossiness.cuh"
 #include "gltf_pbr.cuh"
 
@@ -53,7 +54,6 @@ bool intersectSphere(const Ray& ray, const Sphere& sphere, float& t) {
 
 __device__
 bool intersectTriangle(const Ray& ray, const Triangle& triangle, float& t, float& u, float& v) {
-    constexpr float epsilon = 1e-8f;
     constexpr float tMin = rayMinDistance;
 
     Vec3 edge1 = triangle.v1 - triangle.v0;
@@ -62,7 +62,14 @@ bool intersectTriangle(const Ray& ray, const Triangle& triangle, float& t, float
 
     float determinant = dot(edge1, p);
 
-    if (fabsf(determinant) < epsilon)
+    // Bound cancellation relative to the determinant's products, rather than
+    // to world units. Instancing preserves ray t by leaving local directions
+    // unnormalized; Bistro's 100x transform makes valid determinants tiny.
+    float determinantScale =
+        fabsf(edge1.x) * (fabsf(ray.direction.y * edge2.z) + fabsf(ray.direction.z * edge2.y)) +
+        fabsf(edge1.y) * (fabsf(ray.direction.z * edge2.x) + fabsf(ray.direction.x * edge2.z)) +
+        fabsf(edge1.z) * (fabsf(ray.direction.x * edge2.y) + fabsf(ray.direction.y * edge2.x));
+    if (!isfinite(determinant) || fabsf(determinant) <= 8.0f * FLT_EPSILON * determinantScale)
         return false;
 
     float inverseDeterminant = 1.0f / determinant;

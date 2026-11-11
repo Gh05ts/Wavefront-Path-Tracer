@@ -17,6 +17,7 @@ from urllib.parse import quote, unquote, urlsplit
 from urllib.request import urlopen
 
 from convert_dds_gltf import convert
+from prepare_gltf_lighting import prepare_lighting
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -155,6 +156,10 @@ def main(argv=None):
         verify_document(research, relative)
     derived = convert(bistro / "bistro.gltf", reuse=True, verify_only=args.verify_only)
     verify_document(bistro, derived.relative_to(bistro))
+    balanced = prepare_lighting(derived, ROOT / "assets/scenes/bistro-lighting.gltf",
+                                ROOT / "assets/scenes/bistro-lighting.json", verify_only=args.verify_only,
+                                replace_existing=not args.verify_only)
+    verify_document(ROOT, balanced.relative_to(ROOT))
     print(f"Assets ready: {len(source['documents'])} research variants and Bistro; "
           f"{downloaded} LFS payloads downloaded. Source files and licenses preserved.")
 

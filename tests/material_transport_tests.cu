@@ -8,6 +8,52 @@
 // test refraction through a parallel glass slab against Snell's law.
 __global__ void checkMaterialTransport(int* failure) {
     *failure = 0;
+    // Bistro stores small triangles under a 100x root transform. Camera and
+    // shadow rays must see the same surface regardless of its local units.
+    Triangle small{};
+    small.v0=Vec3(-.0001f,-.0001f,0);
+    small.v1=Vec3(.0001f,-.0001f,0);
+    small.v2=Vec3(0,.0001f,0);
+    small.lightIndex=invalidLightIndex;
+    small.tangent=small.tangent1=Vec3(1,0,0);
+    small.bitangent=small.bitangent1=Vec3(0,1,0);
+    Material diffuse{};
+    Blas blas{};blas.triangles=&small;blas.triangleCount=1;
+    NXB::BVH2::Node leaf{};
+    leaf.bounds=NXB::AABB(make_float3(-.0001f,-.0001f,-.00001f),
+                        make_float3(.0001f,.0001f,.00001f));
+    leaf.leftChild=NXB::InvalidIdx;leaf.rightChild=0;
+    blas.bvh=NXB::BVH2::DeviceView{&leaf,1,0,leaf.bounds};
+    MeshInstance instance{};
+    uint32_t instanceIndex=0;
+    Scene scaled{};scaled.blases=&blas;scaled.instances=&instance;
+    scaled.materials=&diffuse;scaled.directInstanceIndices=&instanceIndex;
+    scaled.directInstanceCount=1;
+    const float scales[]={.01f,1.f,100.f,10000.f};
+    for (float scale:scales) {
+        instance.transform={Vec3(scale,0,0),Vec3(0,scale*.5f,0),Vec3(0,0,scale*2),
+            Vec3(1/scale,0,0),Vec3(0,2/scale,0),Vec3(0,0,.5f/scale),Vec3(0,0,0)};
+        for (int side=0;side<2;++side) {
+            Ray ray(Vec3(0,0,side?-2:2),Vec3(0,0,side?1:-1));
+            auto hit=traceRay(ray,scaled);
+            TraceHitState accelerated;
+            intersectMeshInstance(ray,0,scaled,accelerated,true);
+            if (!hit.didHit || fabsf(hit.hit.t-2)>1e-5f ||
+                accelerated.closestMaterial!=0 || fabsf(accelerated.closestT-2)>1e-5f ||
+                !isOccluded(ray,2.5f,scaled) || isOccluded(ray,1.5f,scaled)) {
+                *failure=23;return;
+            }
+        }
+    }
+    float t,u,v;
+    if (intersectTriangle(Ray(Vec3(0,0,1),Vec3(1,0,0)),small,t,u,v) ||
+        intersectTriangle(Ray(Vec3(1,0,1),Vec3(0,0,-1)),small,t,u,v)) {
+        *failure=24;return;
+    }
+    Triangle degenerate=small;degenerate.v2=degenerate.v1;
+    if (intersectTriangle(Ray(Vec3(0,0,1),Vec3(0,0,-1)),degenerate,t,u,v)) {
+        *failure=25;return;
+    }
     Material materials[2]{};
     materials[0].type = MaterialType::Dielectric;
     materials[0].ior = 1.5f;

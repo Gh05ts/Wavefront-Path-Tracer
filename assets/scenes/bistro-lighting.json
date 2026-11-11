@@ -1,0 +1,5 @@
+{
+  "description": "Scale punctual lights together so the 6830 sun becomes 2.5*pi (7.85398) in renderer units, accounting for the Lambertian 1/pi absent from Niagara's direct diffuse term. Retain bulb emission. Appearance calibration, not a physical-unit conversion or exact Niagara match.",
+  "punctual_intensity_scale": 0.0011499241045350634,
+  "emissive_intensity_scale": 1.0
+}

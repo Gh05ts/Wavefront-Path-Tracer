@@ -3,3 +3,4 @@ benchmarks/
 __pycache__/
 .venv/
 .ntasad-backup/
+assets/scenes/bistro-lighting.gltf

@@ -381,6 +381,13 @@ void testImport(const std::filesystem::path& root) {
         {"KHR_materials_clearcoat", {{"clearcoatFactor",.9},{"clearcoatRoughnessFactor",.2},
             {"clearcoatTexture",{{"index",0}}},{"clearcoatRoughnessTexture",{{"index",0}}},
             {"clearcoatNormalTexture",{{"index",0},{"scale",.7}}}}}};
+    // Bistro's front banner has an emissive texture but no emissiveFactor.
+    // It must retain its reflective material instead of absorbing every ray.
+    doc["materials"][0]["emissiveTexture"] = {{"index",0}};
+    doc["materials"][3]["emissiveTexture"] = {{"index",0}};
+    doc["materials"][3]["emissiveFactor"] = {0,0,0};
+    doc["materials"].push_back({{"emissiveFactor",{2,3,4}},
+                                {"emissiveTexture",{{"index",0}}}});
     { std::ofstream file(root/"scene.gltf"); file << doc.dump(2); }
     GltfScene scene = loadGltfScene((root/"scene.gltf").c_str());
     require(scene.meshes.size()==1 && scene.instances.size()==1, "Geometry import regression");
@@ -393,6 +400,11 @@ void testImport(const std::filesystem::path& root) {
     const Material& defaults = scene.materials.at(2);
     require(defaults.glossiness==1 && defaults.specular.x==1 && defaults.albedo.x==1, "Spec-gloss defaults");
     require(scene.materials.at(3).type==MaterialType::Dielectric && near(scene.materials.at(3).ior,1.45), "Glass import regression");
+    require(scene.materials.at(4).type==MaterialType::Diffuse,
+            "Zero emissiveFactor retains core reflection despite an emissive texture");
+    require(scene.materials.at(5).type==MaterialType::Emissive &&
+            near(scene.materials.at(5).emission.y,3) && scene.materials.at(5).emissiveTexture.texture==0,
+            "Positive emissiveFactor retains textured emission");
     require(near(scene.materials.at(4).metallic,.8) && near(scene.materials.at(4).roughness,.3), "Core material regression");
     const auto& pbr=scene.materials.at(4);
     require(pbr.gltfPbrWorkflow&&!material.gltfPbrWorkflow&&!scene.materials.at(3).gltfPbrWorkflow,"Workflow routing");

@@ -342,7 +342,10 @@ GltfScene loadGltfScene(const char* filename) {
         material.albedo = Vec3(factor[0], factor[1], factor[2]);
         material.emission = Vec3(source.emissiveFactor[0], source.emissiveFactor[1], source.emissiveFactor[2]);
         float transmission = getExtensionNumber(source, "KHR_materials_transmission", "transmissionFactor", 0.0f);
-        material.type = lengthSquared(material.emission) > 0.0f || source.emissiveTexture.index >= 0 ? MaterialType::Emissive :
+        // A texture multiplies emissiveFactor, whose glTF default is zero.
+        // Merely having that texture must not turn Bistro's sign into a black,
+        // nonreflecting emitter and discard its specular-glossiness material.
+        material.type = lengthSquared(material.emission) > 0.0f ? MaterialType::Emissive :
             (transmission > 0.0f ? MaterialType::Dielectric : MaterialType::Diffuse);
         material.roughness = static_cast<float>(source.pbrMetallicRoughness.roughnessFactor);
         material.metallic = static_cast<float>(source.pbrMetallicRoughness.metallicFactor);

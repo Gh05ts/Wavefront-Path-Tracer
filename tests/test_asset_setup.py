@@ -16,6 +16,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import setup_assets as setup
 from convert_dds_gltf import convert
+from prepare_gltf_lighting import prepare_lighting
 
 
 class AssetSetupTests(unittest.TestCase):
@@ -23,6 +24,41 @@ class AssetSetupTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
+
+    def test_offline_lighting_rebases_assets_and_preserves_emission_and_source(self):
+        source_dir = self.root / "source"
+        source_dir.mkdir()
+        (source_dir / "mesh.bin").write_bytes(b"mesh")
+        (source_dir / "color.png").write_bytes(b"texture")
+        doc = {"asset": {"version": "2.0"}, "buffers": [{"uri": "mesh.bin"}],
+               "images": [{"uri": "color.png"}],
+               "extensions": {"KHR_lights_punctual": {"lights": [
+                   {"type": "directional", "intensity": 6830},
+                   {"type": "point", "intensity": 300}]}},
+               "materials": [{"emissiveFactor": [0, 11.4, .52]}, {}]}
+        source = source_dir / "source.gltf"
+        source.write_text(json.dumps(doc))
+        original = source.read_bytes()
+        settings = self.root / "settings.json"
+        settings.write_text(json.dumps({"punctual_intensity_scale": 2.5/6830}))
+        output = self.root / "derived/scene.gltf"
+        prepare_lighting(source, output, settings)
+        actual = json.loads(output.read_text())
+        lights = actual["extensions"]["KHR_lights_punctual"]["lights"]
+        self.assertAlmostEqual(lights[0]["intensity"], 2.5)
+        self.assertAlmostEqual(lights[1]["intensity"], 300*2.5/6830)
+        self.assertEqual(actual["materials"], doc["materials"])
+        self.assertEqual((output.parent / actual["images"][0]["uri"]).resolve(), source_dir / "color.png")
+        self.assertEqual(source.read_bytes(), original)
+        stamp = output.stat().st_mtime_ns
+        prepare_lighting(source, output, settings, verify_only=True)
+        self.assertEqual(output.stat().st_mtime_ns, stamp)
+        settings.write_text(json.dumps({"punctual_intensity_scale": 1}))
+        with self.assertRaisesRegex(ValueError, "preserved"):
+            prepare_lighting(source, output, settings)
+        settings.write_text(json.dumps({"punctual_intensity_scale": -1}))
+        with self.assertRaisesRegex(ValueError, "nonnegative"):
+            prepare_lighting(source, self.root / "invalid.gltf", settings)
 
     def record(self, payload=b"runtime asset"):
         return {"path": "scene/mesh.bin", "bytes": len(payload),

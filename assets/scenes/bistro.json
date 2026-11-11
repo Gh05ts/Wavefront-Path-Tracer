@@ -3,7 +3,7 @@
   "preset": "sponza",
   "object": {
     "source": "gltf",
-    "file": "../niagara_bistro/bistro-png.gltf"
+    "file": "bistro-lighting.gltf"
   },
   "gltf_scale": 1.0,
   "lighting": {
