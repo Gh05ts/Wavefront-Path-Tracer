@@ -1,0 +1,17 @@
+{
+  "sequence_id": "cornell_dragon_firefly_check",
+  "scene_file": "../../../assets/scenes/cornell.json",
+  "width": 640,
+  "height": 360,
+  "tile_width": 160,
+  "tile_height": 90,
+  "max_depth": 32,
+  "russian_roulette_start_depth": 12,
+  "indirect_radiance_clamp": 10,
+  "samples": 4,
+  "reference_samples": 1024,
+  "sample_start": 900000000,
+  "sample_stride": 8192,
+  "caustics": false,
+  "frames": [{}]
+}

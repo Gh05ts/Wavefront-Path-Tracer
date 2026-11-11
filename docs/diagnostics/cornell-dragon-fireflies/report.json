@@ -1,0 +1,362 @@
+{
+  "integrator": 11,
+  "binary_sha256": "0f26a20a4cbb5978e4ce9f696aee0ac29d851761921cac586d7bba036f608324",
+  "active_dataset_binary_unchanged": true,
+  "active_dataset_binary_sha256": "e4c694544e3491fb0a3bdb2923b461065817759f0ed3c1f891460a164bba6a52",
+  "all_buffers_finite": true,
+  "guides_and_counts_equal": true,
+  "commands": [
+    [
+      "/tmp/dragon-cornell-check-build/dataset_capture",
+      "/tmp/dragon-cornell-check/current/s256-r0-clamp0.json",
+      "/tmp/dragon-cornell-check/current/s256-r0-clamp0"
+    ],
+    [
+      "/tmp/dragon-cornell-check-build/dataset_capture",
+      "/tmp/dragon-cornell-check/current/s256-r0-clamp10.json",
+      "/tmp/dragon-cornell-check/current/s256-r0-clamp10"
+    ],
+    [
+      "/tmp/dragon-cornell-check-build/dataset_capture",
+      "/tmp/dragon-cornell-check/current/s256-r1-clamp0.json",
+      "/tmp/dragon-cornell-check/current/s256-r1-clamp0"
+    ],
+    [
+      "/tmp/dragon-cornell-check-build/dataset_capture",
+      "/tmp/dragon-cornell-check/current/s256-r1-clamp10.json",
+      "/tmp/dragon-cornell-check/current/s256-r1-clamp10"
+    ],
+    [
+      "/tmp/dragon-cornell-check-build/dataset_capture",
+      "/tmp/dragon-cornell-check/current/s1024-r0-clamp0.json",
+      "/tmp/dragon-cornell-check/current/s1024-r0-clamp0"
+    ],
+    [
+      "/tmp/dragon-cornell-check-build/dataset_capture",
+      "/tmp/dragon-cornell-check/current/s1024-r0-clamp10.json",
+      "/tmp/dragon-cornell-check/current/s1024-r0-clamp10"
+    ],
+    [
+      "/tmp/dragon-cornell-check-build/dataset_capture",
+      "/tmp/dragon-cornell-check/current/s1024-r1-clamp0.json",
+      "/tmp/dragon-cornell-check/current/s1024-r1-clamp0"
+    ],
+    [
+      "/tmp/dragon-cornell-check-build/dataset_capture",
+      "/tmp/dragon-cornell-check/current/s1024-r1-clamp10.json",
+      "/tmp/dragon-cornell-check/current/s1024-r1-clamp10"
+    ],
+    [
+      "/tmp/dragon-cornell-check-build/dataset_capture",
+      "/tmp/dragon-cornell-check/current/preview-640.json",
+      "/tmp/dragon-cornell-check/current/preview-640"
+    ]
+  ],
+  "base_config": {
+    "sequence_id": "cornell_dragon_firefly_check",
+    "scene_file": "/home/myid/lv37348/new/Wavefront-Path-Tracer/assets/scenes/cornell.json",
+    "width": 640,
+    "height": 360,
+    "tile_width": 160,
+    "tile_height": 90,
+    "max_depth": 32,
+    "russian_roulette_start_depth": 12,
+    "indirect_radiance_clamp": 10,
+    "samples": 4,
+    "reference_samples": 1024,
+    "sample_start": 900000000,
+    "sample_stride": 8192,
+    "caustics": false,
+    "frames": [
+      {}
+    ]
+  },
+  "levels": [
+    {
+      "samples": 256,
+      "clamp": 0,
+      "replica_noise_rmse": 0.024034970747007132,
+      "replicas": [
+        {
+          "unstable_whole": 2,
+          "unstable_floor": 0,
+          "floor_pixels": 6286,
+          "strict_bright_local": 4,
+          "max_rgb": 16.0,
+          "mean_rgb": [
+            0.45759991304178826,
+            0.3881683035812888,
+            0.3454521249567499
+          ]
+        },
+        {
+          "unstable_whole": 8,
+          "unstable_floor": 0,
+          "floor_pixels": 6286,
+          "strict_bright_local": 4,
+          "max_rgb": 16.0,
+          "mean_rgb": [
+            0.45766032810697727,
+            0.3882732956232355,
+            0.34556509399183466
+          ]
+        }
+      ]
+    },
+    {
+      "samples": 256,
+      "clamp": 10,
+      "replica_noise_rmse": 0.02379300664890799,
+      "replicas": [
+        {
+          "unstable_whole": 2,
+          "unstable_floor": 0,
+          "floor_pixels": 6286,
+          "strict_bright_local": 4,
+          "max_rgb": 16.0,
+          "mean_rgb": [
+            0.4574611848664501,
+            0.3880303106648153,
+            0.3453173618539008
+          ]
+        },
+        {
+          "unstable_whole": 5,
+          "unstable_floor": 0,
+          "floor_pixels": 6286,
+          "strict_bright_local": 4,
+          "max_rgb": 16.0,
+          "mean_rgb": [
+            0.4575215166726945,
+            0.3881354730093781,
+            0.3454315779053687
+          ]
+        }
+      ]
+    },
+    {
+      "samples": 1024,
+      "clamp": 0,
+      "replica_noise_rmse": 0.012464869229159636,
+      "replicas": [
+        {
+          "unstable_whole": 0,
+          "unstable_floor": 0,
+          "floor_pixels": 6286,
+          "strict_bright_local": 4,
+          "max_rgb": 16.0,
+          "mean_rgb": [
+            0.45772956164440554,
+            0.38826550941843524,
+            0.3455338967520355
+          ]
+        },
+        {
+          "unstable_whole": 1,
+          "unstable_floor": 0,
+          "floor_pixels": 6286,
+          "strict_bright_local": 4,
+          "max_rgb": 16.0,
+          "mean_rgb": [
+            0.4576564981666201,
+            0.3881803192385725,
+            0.345457531863827
+          ]
+        }
+      ]
+    },
+    {
+      "samples": 1024,
+      "clamp": 10,
+      "replica_noise_rmse": 0.012344722606739253,
+      "replicas": [
+        {
+          "unstable_whole": 0,
+          "unstable_floor": 0,
+          "floor_pixels": 6286,
+          "strict_bright_local": 4,
+          "max_rgb": 16.0,
+          "mean_rgb": [
+            0.45758765751790204,
+            0.38812452575635226,
+            0.3453968667990733
+          ]
+        },
+        {
+          "unstable_whole": 1,
+          "unstable_floor": 0,
+          "floor_pixels": 6286,
+          "strict_bright_local": 4,
+          "max_rgb": 16.0,
+          "mean_rgb": [
+            0.45751571352509923,
+            0.3880405392291031,
+            0.3453221454496899
+          ]
+        }
+      ]
+    }
+  ],
+  "outlier_rule": "luminance > .1, >4x eight-neighbor median, >4x other replica, and excess > .1; can include real glints",
+  "floor_mask": "primary guide geometric normal Y > .9999 and RGB albedo within .0001 of .73",
+  "display": "Reinhard at exposure one then gamma 1/2.2; no denoising",
+  "preclamp_integrator_10_comparison": {
+    "albedo.B": {
+      "identical": true,
+      "max_absolute_difference": 0.0,
+      "rms_difference": 0.0
+    },
+    "albedo.G": {
+      "identical": true,
+      "max_absolute_difference": 0.0,
+      "rms_difference": 0.0
+    },
+    "albedo.R": {
+      "identical": true,
+      "max_absolute_difference": 0.0,
+      "rms_difference": 0.0
+    },
+    "depth.Z": {
+      "identical": true,
+      "max_absolute_difference": 0.0,
+      "rms_difference": 0.0
+    },
+    "geometric_normal.X": {
+      "identical": true,
+      "max_absolute_difference": 0.0,
+      "rms_difference": 0.0
+    },
+    "geometric_normal.Y": {
+      "identical": true,
+      "max_absolute_difference": 0.0,
+      "rms_difference": 0.0
+    },
+    "geometric_normal.Z": {
+      "identical": true,
+      "max_absolute_difference": 0.0,
+      "rms_difference": 0.0
+    },
+    "guide_valid.Y": {
+      "identical": true,
+      "max_absolute_difference": 0.0,
+      "rms_difference": 0.0
+    },
+    "history_valid.Y": {
+      "identical": true,
+      "max_absolute_difference": 0.0,
+      "rms_difference": 0.0
+    },
+    "motion.X": {
+      "identical": true,
+      "max_absolute_difference": 0.0,
+      "rms_difference": 0.0
+    },
+    "motion.Y": {
+      "identical": true,
+      "max_absolute_difference": 0.0,
+      "rms_difference": 0.0
+    },
+    "normal.X": {
+      "identical": true,
+      "max_absolute_difference": 0.0,
+      "rms_difference": 0.0
+    },
+    "normal.Y": {
+      "identical": true,
+      "max_absolute_difference": 0.0,
+      "rms_difference": 0.0
+    },
+    "normal.Z": {
+      "identical": true,
+      "max_absolute_difference": 0.0,
+      "rms_difference": 0.0
+    },
+    "radiance.B": {
+      "identical": false,
+      "max_absolute_difference": 1.1920928955078125e-07,
+      "rms_difference": 4.158115637138801e-09
+    },
+    "radiance.G": {
+      "identical": false,
+      "max_absolute_difference": 4.76837158203125e-07,
+      "rms_difference": 6.366612260133281e-09
+    },
+    "radiance.R": {
+      "identical": false,
+      "max_absolute_difference": 2.384185791015625e-07,
+      "rms_difference": 9.002148042722975e-09
+    },
+    "reference.B": {
+      "identical": false,
+      "max_absolute_difference": 5.960464477539063e-08,
+      "rms_difference": 3.912932850874708e-09
+    },
+    "reference.G": {
+      "identical": false,
+      "max_absolute_difference": 5.960464477539063e-08,
+      "rms_difference": 5.707364354884899e-09
+    },
+    "reference.R": {
+      "identical": false,
+      "max_absolute_difference": 2.384185791015625e-07,
+      "rms_difference": 8.679414771135305e-09
+    },
+    "reference_count.N": {
+      "identical": true,
+      "max_absolute_difference": 0.0,
+      "rms_difference": 0.0
+    },
+    "sample_count.N": {
+      "identical": true,
+      "max_absolute_difference": 0.0,
+      "rms_difference": 0.0
+    }
+  },
+  "preview": {
+    "width": 640,
+    "height": 360,
+    "samples": 1024,
+    "clamp": 10
+  },
+  "source_commit": "cf521a69395fa6e95b595d24893d54ff7cb592e3",
+  "cuda_architecture": 86,
+  "production_controls": {
+    "same_architecture_preclamp_regression": {
+      "old_integrator": 10,
+      "new_integrator": 11,
+      "max_abs": 2.384185791015625e-07,
+      "rms": 6.408777630309515e-09,
+      "mean_old": [
+        0.4577295616631896,
+        0.38826550940320287,
+        0.34553389676365265
+      ],
+      "mean_new": [
+        0.45772956164440554,
+        0.38826550941843524,
+        0.3455338967520355
+      ],
+      "max_rgb": 16.0,
+      "guide_counts_identical": true
+    },
+    "default_clamp_difference": {
+      "max_rgb_change": 0.04687514901161194,
+      "rgb_rms_change": 0.0009669855806063316,
+      "sampled_mean_loss_percent": 0.03524192469435139,
+      "max_rgb": 16.0,
+      "guides_counts_equal": true
+    },
+    "preclamp_binary_sha256": "a1a481d1233a1a86acf8d59cb2644691e8345f9a6c03433ed7c9ec5fa1f550a1"
+  },
+  "active_dataset_binary_before_and_after": {
+    "path": "/tmp/ntasad-capture-build/dataset_capture",
+    "sha256": "e4c694544e3491fb0a3bdb2923b461065817759f0ed3c1f891460a164bba6a52",
+    "sha256_after": "e4c694544e3491fb0a3bdb2923b461065817759f0ed3c1f891460a164bba6a52"
+  },
+  "asset_sha256": {
+    "assets/scenes/cornell.json": "c7ae8d3259fd1db75dc202b0d481e14cf86e46eeb21e84f389bba6a5e73e7402",
+    "assets/DragonAttenuation.gltf": "1f9ba6fb45deb7e946337b04cf92c773471a322fcd065d59410f617277efd2e7",
+    "assets/DragonAttenuation.bin": "f23edc2737ece1f00bbdda75a3b47214f4cd00dc899d90901914e37cb61557b1",
+    "assets/Dragon_ThicknessMap.jpg": "d43e2467430bbbf5601faa062c71b968f62580fe63b197a7677460758475e118"
+  }
+}
